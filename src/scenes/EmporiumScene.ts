@@ -3,6 +3,7 @@ import { TILE, INTERACT_RANGE, calcZoom } from '../config';
 import { Player } from '../entities/Player';
 import { SaveManager } from '../systems/SaveManager';
 import { addToInventory } from '../lib/inventory';
+import { ITEMS } from '../data/items';
 
 const B = 2, F = 7;
 
@@ -151,11 +152,15 @@ export class EmporiumScene extends Phaser.Scene {
     c.add(this.add.text(0, -ph/2+14, 'THE EMPORIUM', { fontSize: '11px', color: '#88aaff' }).setOrigin(0.5));
     c.add(this.add.rectangle(0, -ph/2+26, pw-20, 1, 0x223366));
     items.forEach((item, i) => {
-      const iy = -ph/2 + 44 + i * 22;
+      const iy = -ph/2 + 40 + i * 20;
       c.add(this.add.text(-pw/2+14, iy, `${i+1}. ${item.name}`, { fontSize: '10px', color: '#ccccee' }));
       c.add(this.add.text(pw/2-12, iy, `${item.cost}g`, { fontSize: '10px', color: '#ffdd44' }).setOrigin(1, 0));
     });
-    c.add(this.add.text(0, ph/2-12, '1–5: Buy   Q/Esc: Close', { fontSize: '8px', color: '#223355' }).setOrigin(0.5));
+    // Add Sell All Junk option
+    const junkY = -ph/2 + 40 + items.length * 20;
+    c.add(this.add.text(-pw/2+14, junkY, `6. Sell All Junk`, { fontSize: '10px', color: '#ffaacc' }));
+
+    c.add(this.add.text(0, ph/2-12, '1–5: Buy   6: Sell Junk   Q/Esc: Close', { fontSize: '8px', color: '#223355' }).setOrigin(0.5));
     this.activePanel = c;
     const handler = (e: KeyboardEvent) => {
       const idx = ['1','2','3','4','5'].indexOf(e.key);
@@ -175,6 +180,27 @@ export class EmporiumScene extends Phaser.Scene {
           }
           SaveManager.write(s);
         } else { this.showToast('Not enough gold!'); }
+      } else if (e.key === '6') {
+        const s = SaveManager.load()!;
+        const junkItems = s.inventory.filter(x => x.isJunk);
+        if (junkItems.length > 0) {
+          let totalGoldGained = 0;
+          junkItems.forEach(item => {
+            const base = ITEMS[item.itemId];
+            const val = base?.sellValue ?? 5;
+            totalGoldGained += val * item.qty;
+          });
+          s.inventory = s.inventory.filter(x => !x.isJunk);
+          this.player.addGold(totalGoldGained);
+          s.gold = this.player.gold;
+          SaveManager.write(s);
+          this.game.events.emit('hud-update', this.player);
+          this.showToast(`Sold all junk for ${totalGoldGained}g!`);
+          c.destroy(); this.activePanel = null; window.removeEventListener('keydown', handler);
+          this.openShop();
+        } else {
+          this.showToast('No junk items to sell.');
+        }
       }
       if (e.key === 'q' || e.key === 'Q' || e.key === 'Escape') {
         c.destroy(); this.activePanel = null; window.removeEventListener('keydown', handler);

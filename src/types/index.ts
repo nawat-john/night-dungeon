@@ -25,9 +25,27 @@ export interface CharClass {
   startingEquipment: string[];
 }
 
-export interface ItemStack {
+export type Rarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary' | 'mythic';
+
+export interface Affix {
+  type: 'flat' | 'percent';
+  stat: string;
+  value: number;
+}
+
+export interface ItemInstance {
+  id: string; // unique ID for gear, or itemId for stackables
   itemId: string;
   qty: number;
+  rarity?: Rarity;
+  affixes?: Affix[];
+  isJunk?: boolean;
+  durability?: number;
+  maxDurability?: number;
+  sockets?: string[];
+  maxSockets?: number;
+  upgradeLevel?: number;
+  branch?: 'sharp' | 'light' | 'none';
 }
 
 export interface CharacterSave {
@@ -41,8 +59,8 @@ export interface CharacterSave {
   currentHp: number;
   currentMp: number;
   gold: number;
-  inventory: ItemStack[];
-  equipped: Record<string, string | null>;
+  inventory: ItemInstance[];
+  equipped: Record<string, ItemInstance | null>;
   activeWeaponSlot: 0 | 1;
   hasBag: boolean;
   location: 'town' | 'dungeon';
@@ -50,5 +68,10 @@ export interface CharacterSave {
   floorSeed: number;
   lastWarpIndex: number;
   position: { x: number; y: number };
+  unspentStatPoints: number;
+  unspentSkillPoints: number;
+  unlockedSkills: string[];
+  curseActive?: boolean;
+  masochist?: boolean;
   createdAt: string;
 }

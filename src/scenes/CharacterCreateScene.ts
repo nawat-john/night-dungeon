@@ -3,6 +3,7 @@ import { RACES } from '../data/races';
 import { CLASSES } from '../data/classes';
 import { SaveManager } from '../systems/SaveManager';
 import { CharacterSave, Race, CharClass, Stats } from '../types';
+import { addToInventory } from '../lib/inventory';
 
 type Step = 'race' | 'class' | 'confirm';
 
@@ -19,6 +20,8 @@ export class CharacterCreateScene extends Phaser.Scene {
   private downKey!: Phaser.Input.Keyboard.Key;
   private confirmKey!: Phaser.Input.Keyboard.Key;
   private backKey!: Phaser.Input.Keyboard.Key;
+  private mKey!: Phaser.Input.Keyboard.Key;
+  private masochistMode = false;
 
   constructor() { super('CharacterCreateScene'); }
 
@@ -29,6 +32,7 @@ export class CharacterCreateScene extends Phaser.Scene {
     this.confirmKey = keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
     this.backKey    = keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.cursor     = keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.W);
+    this.mKey       = keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.M);
 
     this.cameras.main.setBackgroundColor('#0d0b14');
     const { width, height } = this.cameras.main;
@@ -49,6 +53,9 @@ export class CharacterCreateScene extends Phaser.Scene {
       this.confirm();
     } else if (Phaser.Input.Keyboard.JustDown(this.backKey)) {
       this.goBack();
+    } else if (this.step === 'confirm' && Phaser.Input.Keyboard.JustDown(this.mKey)) {
+      this.masochistMode = !this.masochistMode;
+      this.renderStep();
     }
   }
 
@@ -149,11 +156,13 @@ export class CharacterCreateScene extends Phaser.Scene {
         `HP: ${final.hp}  MP: ${final.mp}`,
         `STR:${final.str}  DEX:${final.dex}  INT:${final.int}`,
         `VIT:${final.vit}  AGI:${final.agi}`,
+        `Difficulty: ${this.masochistMode ? 'MASOCHIST (Durability Decay)' : 'STANDARD'}`,
+        `[M] key toggles Difficulty`,
         '',
         `> ENTER to begin your run`,
       ];
       lines.forEach((line, i) => {
-        const color = i === lines.length - 1 ? '#aaddaa' : '#ccbbee';
+        const color = line.startsWith('>') ? '#aaddaa' : '#ccbbee';
         const txt = this.add.text(width / 2, startY + i * 16, line,
           { fontSize: '11px', color }
         ).setOrigin(0.5);
@@ -195,8 +204,21 @@ export class CharacterCreateScene extends Phaser.Scene {
       currentHp: stats.hp,
       currentMp: stats.mp,
       gold: 0,
-      inventory: cls.startingEquipment.map(id => ({ itemId: id, qty: 1 })),
-      equipped: { mainhand: null, offhand: null, body: null, weapon2: null },
+      inventory: [],
+      equipped: {
+        head: null,
+        chest: null,
+        hands: null,
+        legs: null,
+        boots: null,
+        mainhand: null,
+        offhand: null,
+        weapon2: null,
+        amulet: null,
+        ring1: null,
+        ring2: null,
+        charm: null
+      },
       activeWeaponSlot: 0,
       hasBag: false,
       location: 'town',
@@ -204,8 +226,18 @@ export class CharacterCreateScene extends Phaser.Scene {
       floorSeed: 0,
       lastWarpIndex: 0,
       position: { x: 640, y: 600 },
+      unspentStatPoints: 0,
+      unspentSkillPoints: 0,
+      unlockedSkills: [],
+      masochist: this.masochistMode,
       createdAt: new Date().toISOString(),
     };
+
+    cls.startingEquipment.forEach(id => {
+      const qty = id === 'arrow' ? 20 : 1;
+      addToInventory(save.inventory, id, qty);
+    });
+
     SaveManager.write(save);
 
     if (!this.scene.isActive('UIScene')) this.scene.launch('UIScene');

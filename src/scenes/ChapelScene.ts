@@ -185,9 +185,18 @@ export class ChapelScene extends Phaser.Scene {
       '1. Sell all Lv1 Stones',
       '2. Sell all Lv2 Stones',
       '3. Convert all to EXP',
+      save.curseActive ? '4. Cleanse Curse (30 gold)' : '4. Cleanse Curse (No active curse)'
     ];
     lines.forEach((line, i) => {
-      c.add(this.add.text(-cw/2+12, -ch/2+36+i*18, line, { fontSize: '9px', color: i > 4 ? '#aaddaa' : '#ccbbee' }));
+      let color = '#ccbbee';
+      if (i > 4) {
+        if (i === 8 && !save.curseActive) {
+          color = '#777777';
+        } else {
+          color = '#aaddaa';
+        }
+      }
+      c.add(this.add.text(-cw/2+12, -ch/2+36+i*18, line, { fontSize: '9px', color }));
     });
     c.add(this.add.text(0, ch/2-12, 'Q/Esc: Leave', { fontSize: '9px', color: '#332255' }).setOrigin(0.5));
     this.activePanel = c;
@@ -238,6 +247,24 @@ export class ChapelScene extends Phaser.Scene {
         if (leveled) this.cameras.main.flash(600, 200, 180, 255, true);
         c.destroy(); this.activePanel = null; window.removeEventListener('keydown', handler);
         this.openChapelPanel();
+      } else if (e.key === '4') {
+        if (!s.curseActive) {
+          this.showToast("You are not cursed!");
+        } else if (s.gold < 30) {
+          this.showToast("Not enough gold (requires 30g)!");
+        } else {
+          this.player.gold -= 30;
+          s.gold = this.player.gold;
+          s.curseActive = false;
+          this.player.activeAilments.delete('curse');
+          this.player.recomputeDerivedStats(s.stats, this.player.level);
+          s.currentHp = this.player.currentHp;
+          SaveManager.write(s);
+          this.game.events.emit('hud-update', this.player);
+          this.showToast("Curse cleansed successfully!");
+          c.destroy(); this.activePanel = null; window.removeEventListener('keydown', handler);
+          this.openChapelPanel();
+        }
       } else if (e.key === 'q' || e.key === 'Q' || e.key === 'Escape') {
         c.destroy(); this.activePanel = null; window.removeEventListener('keydown', handler);
       }

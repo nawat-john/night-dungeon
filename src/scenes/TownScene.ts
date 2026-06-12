@@ -110,10 +110,11 @@ export class TownScene extends Phaser.Scene {
     };
 
     // Store entrances — position at door tile (just outside building south wall)
-    this.interactables.push({ col: 5,  row: 12, label: 'Enter Armory',   onInteract: () => goScene('ArmoryScene')   });
-    this.interactables.push({ col: 30, row: 12, label: 'Enter Inn',       onInteract: () => goScene('InnScene')      });
-    this.interactables.push({ col: 57, row: 12, label: 'Enter Emporium',  onInteract: () => goScene('EmporiumScene') });
-    this.interactables.push({ col: 6,  row: 44, label: 'Enter Chapel',    onInteract: () => goScene('ChapelScene')   });
+    this.interactables.push({ col: 5,  row: 12, label: 'Enter Armory',       onInteract: () => goScene('ArmoryScene')      });
+    this.interactables.push({ col: 30, row: 12, label: 'Enter Inn',           onInteract: () => goScene('InnScene')         });
+    this.interactables.push({ col: 57, row: 12, label: 'Enter Emporium',      onInteract: () => goScene('EmporiumScene')    });
+    this.interactables.push({ col: 6,  row: 44, label: 'Enter Chapel',        onInteract: () => goScene('ChapelScene')      });
+    this.interactables.push({ col: 56, row: 29, label: "Enter Sage's Tower",  onInteract: () => goScene('SagesTowerScene') });
 
     // Dungeon gate
     this.interactables.push({
@@ -218,10 +219,11 @@ export class TownScene extends Phaser.Scene {
     deco('town_bench', 28, 22, 3); deco('town_bench', 33, 22, 3);
 
     // ── Building labels — small, worn, no icons ──────────────────────────────────
-    this.add.text(wx(5.5),  wy(0.5),  'ARMORY',       { fontSize: '7px', color: '#5a4a30' }).setOrigin(0.5).setDepth(5);
-    this.add.text(wx(31),   wy(0.5),  'THE LAST INN', { fontSize: '7px', color: '#5a4a30' }).setOrigin(0.5).setDepth(5);
-    this.add.text(wx(56.5), wy(0.5),  'EMPORIUM',     { fontSize: '7px', color: '#5a4a30' }).setOrigin(0.5).setDepth(5);
-    this.add.text(wx(6),    wy(31.6), 'CHAPEL',       { fontSize: '7px', color: '#3a3344' }).setOrigin(0.5).setDepth(5);
+    this.add.text(wx(5.5),  wy(0.5),  'ARMORY',         { fontSize: '7px', color: '#5a4a30' }).setOrigin(0.5).setDepth(5);
+    this.add.text(wx(31),   wy(0.5),  'THE LAST INN',   { fontSize: '7px', color: '#5a4a30' }).setOrigin(0.5).setDepth(5);
+    this.add.text(wx(56.5), wy(0.5),  'EMPORIUM',       { fontSize: '7px', color: '#5a4a30' }).setOrigin(0.5).setDepth(5);
+    this.add.text(wx(6),    wy(31.6), 'CHAPEL',         { fontSize: '7px', color: '#3a3344' }).setOrigin(0.5).setDepth(5);
+    this.add.text(wx(56.5), wy(15.4), "SAGE'S TOWER",   { fontSize: '7px', color: '#7733aa' }).setOrigin(0.5).setDepth(5);
     // Town name — faded
     this.add.text(wx(31.5), wy(-0.5), 'NIGHTFALL', { fontSize: '10px', color: '#443355' }).setOrigin(0.5).setDepth(5);
     // Dungeon gate inscriptions
@@ -229,6 +231,13 @@ export class TownScene extends Phaser.Scene {
     this.add.text(wx(40.5), wy(37),   'ABANDON\nALL HOPE', { fontSize: '6px', color: '#4a1818', align: 'center' }).setOrigin(0.5).setDepth(5);
     this.add.text(wx(24.5), wy(41.5), '☠', { fontSize: '12px', color: '#3a1a22' }).setOrigin(0.5).setDepth(5);
     this.add.text(wx(38.5), wy(41.5), '☠', { fontSize: '12px', color: '#3a1a22' }).setOrigin(0.5).setDepth(5);
+
+    // §12 Sage's Tower — crystal and rune decorations
+    for (const col of [52, 55, 58, 61]) deco('deco_crystal_b', col, 16, 4);
+    for (const [rc, rr] of [[54, 20], [58, 24], [56, 18]]) {
+      const rune = this.add.image(wx(rc as number), wy(rr as number), 'deco_rune').setDepth(2).setAlpha(0.5);
+      this.tweens.add({ targets: rune, alpha: { from: 0.2, to: 0.7 }, duration: 1400 + Math.random() * 800, yoyo: true, repeat: -1 });
+    }
   }
 
   // ── Town map (64 × 52 tiles) ──────────────────────────────────────────────────

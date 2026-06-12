@@ -11,6 +11,7 @@ import { ChapelScene } from './scenes/ChapelScene';
 import { DungeonScene } from './scenes/DungeonScene';
 import { UIScene } from './scenes/UIScene';
 import { FloorTransitionScene } from './scenes/FloorTransitionScene';
+import { SagesTowerScene } from './scenes/SagesTowerScene';
 
 // Wait for "Press Start 2P" to finish loading before Phaser creates any text,
 // so no frame ever renders with a fallback font.
@@ -58,7 +59,7 @@ function startGame(): void {
       arcade: { debug: false },
     },
     scene: [BootScene, PreloadScene, MainMenuScene, CharacterCreateScene,
-      TownScene, ArmoryScene, EmporiumScene, InnScene, ChapelScene,
+      TownScene, ArmoryScene, EmporiumScene, InnScene, ChapelScene, SagesTowerScene,
       FloorTransitionScene, DungeonScene, UIScene],
   });
 }
