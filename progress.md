@@ -1,476 +1,441 @@
-# Night Dungeon — Progress Tracker
+# Dungeon RPG — Expansion Progress (P7 → P12)
 
-> Based on `DUNGEON_RPG_SPEC.md` + `DUNGEON_RPG_DESIGN_FULL.md`.
-> Update this file whenever a feature ships.
-
----
-
-## Phase Roadmap
-
-| Phase | Status |
-|-------|--------|
-| P0 — Walk-around prototype | ✅ Done |
-| P1 — Main menu + character creation | ✅ Done |
-| P2 — Town hub + UIScene HUD | ✅ Done |
-| P3 — FloorGenerator, warp pads, floors 1–10 | ✅ Done |
-| P4 — Combat, enemy AI, loot, inventory | ✅ Done (basic) |
-| P5 — Supabase auth + SaveManager, permadeath wipe | ✅ Done |
-| **P6 — Art pass, SFX/music, balancing, polish** | 🔄 Current |
+> Tracks implementation of `DUNGEON_RPG_EXPANSION.md`.
+> Baseline: P1–P5 complete; Phase 6 (art/polish) in progress.
+> Numbers & formulas: `physRaw = max(6, STR×3+DEX) × MV`, crit ×1.35, status build-up to 100.
 
 ---
 
-## §11 — Combat Core (real-time, MH-weight)
+## P7 — Damage Pipeline & Affinity Core *(the one big rock)*
 
-- [x] Basic melee attack (spacebar, hitbox)
-- [x] Post-hit i-frames (invulnerability window after taking damage)
-- [x] Ranged attack (projectile from bow/staff)
-- [x] Weapon switching (Q key, 2 slots)
-- [x] Combat state machine (IDLE → STARTUP → ACTIVE → RECOVERY)
-- [x] Startup / active / recovery frames per attack (light: 167/67/267ms, heavy: 267/67/433ms)
-- [x] Dodge roll with dedicated i-frames (Z key, i-frames ms 50–150 of 200ms roll)
-- [x] Roll cancel into light attack recovery (dodge allowed during light recovery, not heavy)
-- [x] Stamina bar (second resource under HP — yellow bar in UI)
-- [x] Stamina costs: dodge 25, light 8, heavy 22
-- [x] Exhausted state (0 stamina → no dodge/heavy, −25% move speed)
-- [x] Heavy attack (X key, MV 0.55, no roll cancel, orange tinted slash)
-- [x] Poise system (accumulate poise damage per hit → stagger at 15% of enemy max HP threshold)
-- [x] Knockback (player: impulse + decay on hit; enemy: impulse + AI override after stagger)
-- [x] Damage formula (MV × attackDmg × STR scaling × crit multiplier)
-- [x] Crit chance from AGI (3% base + 0.6% per AGI); crit damage ×1.35; yellow float text
-- [x] Potion drink = 1.5s rooted channel (1/2/3 hotbar keys, dodge cancels and wastes item)
-- [x] Spawn-protection (1.0s no damage after floor load)
-- [x] 0.3s input buffer on dodge/attack
-- [x] Damage float numbers (white normal, yellow crit, green heal, blue MP)
-- [x] Guard / block (shield-capable classes — Tanker; G key, stamina drain, guard window)
-- [x] Perfect guard (6-frame/100ms window → 0 damage, stagger attacker 800ms)
-- [x] Parry (weapon skill, tight window → riposte) — needs §14 skill system
-- [ ] Hitzones per enemy (weak points, armored parts) — needs §19 boss system
-- [x] Aggro / threat table (lightweight `threatMap` on Enemy, `addThreat('player', dmg)` on every hit)
-- [x] No-facetank enforcement: range asymmetry (ENEMY_ATTACK_RANGE=50 > player light-attack reach ~44px)
+### Types & data models (`src/types/index.ts`)
+- [x] Add `PhysType = 'slash' | 'blunt' | 'pierce'`
+- [x] Add `BodyType` union (flesh / armored / bone / gelatinous / chitin / construct / ethereal / plant / aerial)
+- [x] Expand `Element` to include `'radiant'` and unify type (none/physical/blunt/fire/ice/lightning/poison/void/radiant)
+- [x] Add `Ailment` extensions: `'ko' | 'wound' | 'sear' | 'blind' | 'stuck' | 'corruption' | 'frostbite'`
+- [x] Add `Affinity` interface (body, weak/resist/immune/absorb arrays)
+- [x] Add `Hitzone` interface (id, rawMod, elemMod, breakable?, breakHp?, breakReward?, disablesAttack?)
+- [x] Add `WeaponExt` interface (physType, element?, elementValue?, trait?, uniqueEffectId?, infusedElement?)
+- [x] Add `StatusBuildup` interface (ailment, value → 100)
+- [x] Add `EffectSpec` interface (id, kind, params, channelMs?, durationMs?)
+- [x] Add `CharacterSaveV2Add` fields (specialization?, hunterState?, activeTonic?, weaponInfusions?, runModifiers?)
+- [x] Bump `CharacterSave.version` to 2; `SaveManager.migrate()` forwards v1 → v2 with safe defaults
 
----
+### Charts & config (`src/config.ts`)
+- [x] Add `PHYS_CHART[BodyType][PhysType]` — 9×3 multiplier table (0.5–1.3)
+- [x] Add `ELEM_CHART[family][Element]` — family-keyed multiplier table (−0.5–2.0)
+- [x] Add `TUNING_V2` block (affinity mult bands, status params, research thresholds, mastery cap, tonic durations, boss phase thresholds)
 
-## §12 — Stats & Progression
+### Damage resolver refactor
+- [x] Create `src/systems/CombatSystem.ts` with `resolveHit(baseDmg, physType, element, body?, elemFamily?) → HitResult`
+- [x] Apply `physMult` from `PHYS_CHART` using weapon `physType` vs enemy `body`
+- [x] Apply `elemMult` from `ELEM_CHART`; negative mult = heal enemy (absorb)
+- [x] Elemental split: 25% phys + 75% elem for elemental attacks; pure phys for `element='none'`
+- [x] Accept optional `Hitzone` param in `resolveHit`; apply `rawMod` to physPart, `elemMod` to elemPart
+- [x] Apply ±3% random variance at the end of `resolveHit`
+- [x] Default all existing weapons to a sensible `physType` via `physTypes` table in `items.ts`
 
-- [x] Core stats (HP, MP, STR, DEX, INT, VIT, AGI)
-- [x] XP gain from kills
-- [x] Level up
-- [x] Race modifiers applied at character creation
-- [x] Class base stats
-- [x] Derived stats from formulas (maxStamina, physAtk, defense, critChance, critDmg, dodgeChance, moveSpeed)
-- [x] Manual stat point allocation on level up (+5 per level; C key → character screen panel with +1 buttons)
-- [x] Soft caps (STR/DEX/INT scaling bends past 60 — ×0.6 coefficient)
-- [x] XP curve: `round(50 × level^1.6)` (implemented in `expForLevel()`)
-- [x] Level cap 50 (`LEVEL_CAP = 50` in config)
-- [x] Respec at Sage's Tower (escalating gold: `100 × level² / 2`; new SagesTowerScene)
+### Enemy & boss data (`src/data/enemies.ts`, `src/data/bosses.ts`)
+- [x] Tag every enemy with `body` and `elemFamily` (all ~40 entries in ENEMY_DEFS)
+- [x] Tag every boss with `body`, `elemFamily`, and 2–4 hitzones (all 11 boss entries in bosses.ts)
+
+### Visual feedback
+- [x] Tinted elemental damage numbers via `elemColor()` helper (fire=orange, ice=cyan, lightning=yellow, poison=green, void=purple, radiant=white)
+- [x] "WEAK!" / "RESIST" / "ABSORB" / "IMMUNE" hit indicators
+
+### Acceptance criteria
+- [x] Mace out-damages sword vs skeletons (armored/bone body) — PHYS_CHART bone: blunt 1.3 vs slash 0.8
+- [x] Fire weapon shows doubled damage vs frost enemies — ELEM_CHART ice: fire 2.0
+- [x] Void weapon vs Void floor enemy shows "ABSORB" and heals enemy — ELEM_CHART void: void −0.5
+- [x] Existing saves load without error — `SaveManager.migrate()` adds V2 defaults, clamped to `SAVE_VERSION=2`
 
 ---
 
-## §13 — Weapon Archetypes & Movesets
+## P8 — Status & Reactions Expansion *(complete)*
 
-- [x] Sword / Long Sword (basic melee)
-- [x] Bow (basic ranged)
-- [x] Staff (basic magic projectile)
-- [x] Weapon family data schema (`WeaponMoveset`, `AttackMove` with mv/startup/active/recovery)
-- [x] Motion values (MV) per attack
-- [x] Light combo chains per family
-- [x] Heavy attack (hold/charge) per family
-- [x] Special / gauge move per family
-- [x] Greatsword (charge tiers, no roll-cancel)
-- [x] Twin Daggers (flurry, backstab, Frenzy toggle)
-- [x] Mace / Hammer (blunt poise damage, KO build-up)
-- [x] Spear / Halberd (reach, brace counter-thrust)
-- [x] Crossbow (reload rhythm, pierce)
-- [x] Tome + Focus (glyph placement + detonation)
-- [x] Gauntlets / Claws (Flow stacks on consecutive perfect dodges)
-- [x] Edge / sharpness system (0–100, decays per hit, Whetstone restore)
-- [x] Ammo system for bows/crossbows
-- [x] Weapon gauge (Edge gauge, Charge gauge, etc.)
+### New ailments
+- [x] **Bleed** — DoT that worsens while target moves; from slash weapons; ineffective vs undead/construct/ethereal
+- [x] **KO / Topple** — blunt fills hidden KO meter → enemy topple (1500ms punish window, +30% dmg bonus)
+- [x] **Wound** — pierce/crit builds up; marked hitzone takes +25%; ineffective vs formless slimes
+- [x] **Freeze Solid** — ice build-up to full → frostbite (6s) → frozen (1200ms stun); blunt on frozen = +60% Shatter AoE
+- [x] **Sear** — radiant DoT 5/s ignores defense; Blind (lowers aggro range) vs living targets after 500ms
+- [x] **Blind** — reduces enemy aggro range while active
+- [x] **Corruption** — void DoT 2% maxHp/s
+- [x] **Stuck** — zeros velocity each tick until expiry (Gel Cube engulf; Gelatinous-source)
 
----
+### Status-by-source wiring (`applyAttackAilment`)
+- [x] Slash weapons → Bleed build-up (skipped vs undead/construct/spectral)
+- [x] Blunt weapons → KO meter build-up (+50% with Mace family via `isBlunt`)
+- [x] Pierce weapons → Wound build-up (skipped vs gelatinous body)
+- [x] Fire element → Burn build-up (+52% vs plant)
+- [x] Ice element → Frostbite build-up (chains: frostbite expire → frozen trigger)
+- [x] Lightning element → Shock; ×2 build-up on Wet targets
+- [x] Poison element → Poison DoT (+25% vs beast)
+- [x] Void element → Corruption
+- [x] Radiant element → Sear
 
-## §14 — Class Identity, Skills & Skill Trees
+### Environmental reactions (`src/systems/StatusSystem.ts`)
+- [x] Fire + ice/chill/frostbite → Shatter (35 dmg AoE)
+- [x] Blunt (KO build) + Frozen → Enhanced Shatter (55 dmg +60% AoE radius)
+- [x] Fire + shock → Overload (AoE 25 dmg)
+- [x] Ice/frostbite + shock → Superconduct (15 dmg + def debuff 6s)
+- [ ] **Wet tiles** — lightning ×2.0, fire ×0.5, ice can freeze-solid (tile-based; P12 scope)
+- [ ] **Oil tiles** — fire ignites → spreading burn field (existing `Hazard` system; P12 scope)
+- [ ] **Ice patches** — movement penalty unless Frostward set (tile-based; P12 scope)
 
-- [x] Class selection at character creation (Swordman, Archer, Tanker, Assassin, Sage)
-- [x] Class weapon access restrictions (basic)
-- [x] Skill tree data (`SkillNode`, `ClassSkillTree` with branches × tiers)
-- [x] Skill points (1/level + boss-clear bonuses)
-- [x] Active skills (on cooldown, costing MP or stamina)
-- [x] Passive skill nodes
-- [x] Skill unlock / tree progression
-- [x] Swordman — Riposte stance + Blade / Guard / Tempo branches + capstone
-- [x] Archer — Coating loadout + Precision / Volley / Survival branches + capstone
-- [x] Tanker — Taunt + Bastion + Aegis / Provoke / Impact branches + capstone
-- [x] Assassin — Stealth + Shadow / Venom / Tempo branches + capstone
-- [x] Sage — Element swap + Pyromancy / Glyph / Mysticism branches + capstone
-- [x] Cooldown timers on active skills
-- [x] Ultimate / capstone cooldowns (40–90s)
+### Hitzones on normal enemies
+- [x] All 13 brute enemies get 2 hitzones with own `rawMod` / `elemMod` and `breakPart`
+- [x] Small / swarm enemies remain single-zone
 
----
+### Mini-breaks on big enemies
+- [x] Brutes/champions: one `breakPart` with dmgThreshold + material drop
 
-## §15 — Status Effects & Elemental Reactions
+### Damage multipliers in hit paths
+- [x] Wound check (+25% baseDmg) in melee and projectile hit paths
+- [x] KO punish window check (+30% baseDmg) in melee and projectile hit paths
+- [x] Boss affinity (body/elemFamily) now passed to `resolveHit` in all hit paths
 
-- [x] Ailment build-up meters (show before trigger)
-- [x] Ailment duration bars after trigger
-- [x] Poison (DoT, ignores some defense)
-- [x] Bleed (DoT worsens while moving)
-- [x] Burn (DoT + −defense; roll to extinguish)
-- [x] Freeze / Chill (−speed; full freeze = stun)
-- [x] Shock / Paralysis (periodic stun-lock)
-- [x] Stun / KO (blunt, mash to recover)
-- [x] Curse (−max HP until cleansed)
-- [x] Webbed / Rooted (can't move)
-- [x] Resistance system (race/gear modifiers)
-- [x] Elemental triangle (Fire, Ice, Lightning, Void, Light)
-- [x] Reactions: Fire+Ice → Shatter, Fire+Lightning → Overload, Ice+Lightning → Superconduct
-- [x] Water-soaked amplification (+50% lightning, −50% fire)
-- [x] Environmental hazards (oil pools, water, ice patches, gas)
+### Acceptance criteria
+- [x] Blunt topples a brute → TOPPLE! text + ko_punish_ms set for 3s
+- [x] Freezing + blunt = Shatter AoE fires (KO build + frozen reaction)
+- [x] Frostbite expires → frozen stun 1200ms
+- [x] Lightning damage on wet target = ×2 shock build-up
 
 ---
 
-## §16 — Items & Equipment
+## P9 — Item & Gear Flood *(complete)*
 
-- [x] Basic item data schema (`BaseItem` with id/name/kind/rarity/icon)
-- [x] Consumables (HP potions, MP potions)
-- [x] Basic weapons and armor in item tables
-- [x] Inventory system (add/remove/use)
-- [x] Equipment slots (weapon, offhand)
-- [x] Full rarity tiers (Common → Uncommon → Rare → Epic → Legendary → Mythic)
-- [x] Affix system (rolled on gear: +STR, +critChance, lifesteal%, etc.)
-- [x] Set bonuses (2-piece / 4-piece, themed to bosses)
-- [x] Full equipment slots: head, chest, hands, legs, boots, amulet, ring1, ring2, charm
-- [x] Armor weight penalty (move speed + roll distance)
-- [x] Full weapon catalog (10 families × ~10 weapons with upgrade trees)
-- [x] Full armor catalog (~6 sets per floor)
-- [x] All consumables (Whetstone, Smoke Bomb, Traps, Camp Kit, Warp Crystal, etc.)
-- [x] Material items (monster parts, ores, essences, herbs)
-- [x] Inventory grid UI with drag-drop
-- [x] Equipment paper-doll with stat diff preview (green/red deltas)
-- [x] Compare tooltips
-- [x] Sort / filter / mark-as-junk
+### Elemental weapon variants (`src/data/items.ts`)
+- [x] Generate elemental variants: 6 prefixes × 10 families × 10 tiers = 600 items; IDs: `{prefix}_{family}_t{tier}`
+- [x] Prefixes: `flame_`, `frost_`, `storm_`, `venom_`, `void_`, `radiant_`; raw phys ×0.85, elementValue = tier×4
+- [x] Pure (non-elemental) variants keep full raw phys (existing 100-item generator unchanged)
 
----
+### Unique / Legendary weapons (20)
+- [x] All 20 unique weapons defined in ITEMS: Worldknell, Whisper & Wane, Dawnedge, Stormcaller, Mountainbreaker, Comet's Tongue, The Last Page, Gilded Fang + 12 more
+- [x] Each carries appropriate family/physType/element/trait/elementValue/isUnique flags
+- [x] `WeaponTrait` type union defined in `types/index.ts` (P11 behavior hooks)
 
-## §17 — Crafting, Upgrading & Enchanting
+### Boss-forge weapon lines (10)
+- [x] One weapon per boss material: goblin_shiv, tide_spear, venom_crossbow, warlord_mace, furnace_blade, ysolds_lance, requiem_staff, rift_cleaver, twin_serpents, sovereign_blade
+- [x] Each carries boss element + trait where applicable
 
-- [x] Blacksmith upgrade trees (branching, spend gold + mats)
-- [x] Boss-part forging (rare mats → signature weapon/armor set)
-- [x] Enchanting at Sage's Tower (reroll affixes, socket runes, transmute)
-- [x] Rune sockets on gear
-- [x] Transmute (junk mats → chance at higher mat)
-- [x] Durability / repair (Masochist toggle, off by default)
+### Weapon identity traits — data stubs
+- [x] `WeaponTrait` type defined; all 16 trait IDs referenced by weapons; behavior implementation P11 scope
 
----
+### Restoratives
+- [x] minor_potion (+40 HP), health_potion (+90 HP, updated), greater_potion (+180 HP), mega_elixir (full HP+MP)
+- [x] regen_draught, greater_mana_potion, ether_bun, cleansing_tonic, panacea, bandage
 
-## §18 — Enemies & Bestiary
+### Combat tonics (11 items)
+- [x] might_draught, sorcerers_draught, adamant_tonic, focus_tonic, endurance_brew, quickfoot_tonic
+- [x] whetting_oil_flame/frost/storm/venom/radiant — saved to activeTonic + weaponInfusions on use
 
-- [x] Chaser AI (pathfind → melee)
-- [x] Lurker / ambush variant
-- [x] Basic alert / detect ranges (sight + sound)
-- [x] Per-floor enemy themes with `floorMin`
-- [x] Enemy drop table (item + chance)
-- [ ] Full AI archetypes: Skirmisher, Ranged, Charger, Caster, Swarm, Support, Brute
-- [ ] Composable AI state data (behavior list per enemy def)
-- [ ] Anticipation frames + SFX telegraph on each attack
-- [ ] Stagger / flinch reactions to player poise damage
-- [ ] Leash range (enemy returns home if player flees far)
-- [ ] Elite modifier system (1 affix roll on spawn)
-- [ ] Champion modifier (2–3 affixes, mini-boss HP, guaranteed rare drop + breakable part)
-- [ ] Elite visual tints / auras
-- [ ] Full floor 1–10 enemy roster (~40 enemy defs)
-- [ ] Spawn director (budget-based density, ambush pockets, anomaly rolls)
+### Throwables (11 items)
+- [x] throwing_knife, elem_flask ×4, flash_bomb, sonic_bomb, holy_water, caltrops, dung_bomb, oil_flask
 
----
+### Traps & deployables (6 items)
+- [x] spike_trap, shock_trap, snare_trap, bomb_barrel, decoy_totem, tent, camp_kit
 
-## §19 — Floor Bosses (1–10)
+### Utility / exploration items (7 items)
+- [x] torch, lockpick, rope, monster_bait, detector_charm, recall_stone, warp_crystal
 
-- [ ] Boss state machine (phases, HP thresholds, attack pools)
-- [ ] Breakable parts (focus damage → stagger → rare mat drop)
-- [ ] Phase transitions (new attack pool + arena event)
-- [ ] Boss HP bar UI with part-break pips
-- [ ] Enrage / soft timer
-- [ ] Floor 1: Goblin Warlord
-- [ ] Floor 2: The Drowned King
-- [ ] Floor 3: Brood Matron
-- [ ] Floor 4: Sir Mordrek, Fallen Captain
-- [ ] Floor 5: Forgefather Brand
-- [ ] Floor 6: Frost Warden Ysold
-- [ ] Floor 7: The Hollow Choir
-- [ ] Floor 8: Riftmaw
-- [ ] Floor 9: The Ascendant Twins
-- [ ] Floor 10: The Sovereign / Dungeon Heart (multi-phase finale)
+### Alchemy / crafting (`src/data/alchemy.ts`)
+- [x] 25 recipes covering restoratives, tonics, oils, throwables, arrows, transmutation
+- [x] `recipesFor(location, researchLevel)` helper; UI implementation P12
+
+### Affixes expansion (`src/data/affixes.ts`)
+- [x] 40+ affixes across offensive/defensive/utility/legendary categories
+- [x] `AFFIX_CATALOG: AffixDef[]` exported with valueMin/valueMax bands per affix
+- [x] All 4 legendary affixes defined: perfect-dodge heal, topple drop, freeze shatter, first-hit crit
+
+### Decorations / jewels
+- [x] `jewelSkill/jewelLevel/jewelValue` fields on Item; `type: 'jewel'` added to ItemType
+- [x] Attack Jewel 1/2/3, Element Jewel ×6, Guard/Evade/Status/Recovery jewels, Slayer Jewel ×6 body types = 19 jewel items
+- [x] Socketing UI: P12 scope (Armory)
+
+### Runes expansion
+- [x] 14 new runes: DEX/AGI, Guard/Evade, Fire/Ice/Lightning/Poison/Void/Radiant (elemental), Bleed/KO/Wound (status), Thorns, Greed
+
+### Set bonuses (all 8 defined)
+- [x] Goblin, Drowned, Brood, Captain, Sage, Iron Plate — existing 6 sets wired in code
+- [x] **Frostward** — `frostward_` armor set (5 pieces); 4pc: +30% frostbite/frozen build; 5pc: freezes shatter with +30% bonus (wired in StatusSystem)
+- [x] **Voidbane** — `voidbane_` armor set (5 pieces); 4pc: +30% sear build; 5pc: immune to Corruption (wired in StatusSystem)
+
+### useConsumable — data-driven dispatch
+- [x] Reads healHp/healMp/tonicEffect/cleanseOne/cleanseAll/stopBleed from item definition
+- [x] Whetting oils write weaponInfusions[mainhand] to save
+- [x] Panacea grants 5s status_immune_ms; bandage clears bleed
+
+### Acceptance criteria
+- [x] Player can fix matchup gap three ways: weapon2 swap / whetting oil (infuse element) / elemental rune infusion
+- [x] Jewel data fully defined; socketing UI pending P12
+- [x] Every set's 5pc has a named effect (all 8 sets documented; frostward/voidbane wired in StatusSystem)
 
 ---
 
-## §20 — Anomalies (Rare World Events)
+## P10 — Monster Identity & Research/Bestiary *(complete)*
 
-- [ ] Anomaly registry (`AnomalyDef` data + `AnomalySystem`)
-- [ ] Spawn director rolls anomaly per floor (22% base chance)
-- [ ] Ambient announce cue (screen tint, music sting, HUD whisper)
-- [ ] 🌀 Dimensional Rift (otherworld arena, Rift Boss, Mythic drops)
-- [ ] 🌀 Mirror Rift (fight your own shade / build)
-- [ ] 🕯️ Secret Summon: The Gravelord (light 4 candles)
-- [ ] 🕯️ Secret Summon: Avarice, the Gilded Maw (carry gold threshold)
-- [ ] 🕯️ Secret Summon: The Clockwork Judge (no-damage champion kill)
-- [ ] 🕯️ Secret Summon: Old Friend (3 journal pages + camp)
-- [ ] 🕯️ Secret Summon: The Hungering Dark (full floor in dark)
-- [ ] 🗡️ The Hunter (nemesis NPC, stalking, invasion, nemesis arc)
-- [ ] 🛒 Wandering Merchant
-- [ ] ⚖️ Cursed Bargain Shrine (boon for permanent curse)
-- [ ] 🎲 Gambler's Chest (mimic or jackpot)
-- [ ] ⛓️ The Caged Ally (free them → temporary/permanent companion)
-- [ ] 🌑 Blood Moon (floor-wide elite roll, doubled drops)
-- [ ] 📜 Echo of a Fallen Hero (duel past dead run, recover lost gold)
-- [ ] 🐾 Beast Stampede
+### Monster identity template
+- [x] `identity`, `signature`, `counter`, `statusVuln`, `lore` fields added to EnemyDef interface
+- [x] All 35 existing enemies filled with identity data (body/elemFamily already set P7)
+- [x] Identity strings cover: what makes it scary, the counter, status vulnerabilities
 
----
+### New monster families (12 new enemies added to ENEMY_DEFS)
+- [x] **Ironback Beetle** (F3+, fungal, chitin/insect) — carapace resists slash+blunt; pierce underbelly
+- [x] **Gel Cube** (F2+, flooded, gelatinous/aquatic) — engulf → Stuck; slash to free; nucleus hitzone
+- [x] **Mirror Knight** (F4+, barracks, armored/undead) — gem hitzone (mirror_shield = 0 mod); melee flank only
+- [x] **Storm Elemental** (F6+, frozen, construct/storm) — absorbs lightning (enrages); fire+ice break it
+- [x] **Bog Witch** (F2+, flooded, flesh/beast) — element-curse hex; interrupt or swap element
+- [x] **Sand Lurker** (F5+, foundry, chitin/insect) — ash-burrow ambush; Detector/Sonic reveals
+- [x] **Plague Hound** (F3+, deadland, flesh/beast) — fast-pack poison; Panacea + fire AoE
+- [x] **Living Armor** (F7+, court, construct/undead) — gem hitzone 3.0×/2.5× only; armor = 0.05×
+- [x] **Rift Wisp** (F8+, void, ethereal/void) — blink-skirmisher; radiant forces materialization
+- [x] **Choir Acolyte** (F7+, catacombs, bone/undead) — resurrection chant; radiant interrupts
+- [x] **Gravetide** (F7+, catacombs, flesh/undead) — endless swarm from spawner-crypt
+- [x] **Aurelion** (F1+, cave, flesh/beast) — rare fleeing stag; rewards Radiant mat for tracking
 
-## §21 — Camping & Survival
+### New ElemFamily
+- [x] `'storm'` added to ElemFamily union and ELEM_CHART: absorbs lightning (−0.5), weak fire+ice (1.5)
 
-- [ ] Camp Kit consumable item
-- [ ] `campable` room flag in FloorGenerator
-- [ ] Camp setup (hold E, ~3s channel, enemies interrupt)
-- [ ] Rest (60% HP, 50% MP restore; advances danger clock)
-- [ ] Ambush roll on rest (rises with floor + noise level)
-- [ ] Watch system (companion reduces ambush chance)
-- [ ] Cooking system (Ration + Mat → timed buff meals)
-- [ ] Meal variety: Hearty Stew, Spiced Skewers, Iron Porridge, Hunter's Tea, Mage's Broth, Trailmix
-- [ ] Camp basic crafting (potions from herbs, arrows, whetstones)
-- [ ] Loadout stash swap at camp
+### Elite/Champion affixes (matchup-aware)
+- [x] **Warded** (cyan aura) — elemental attacks ×0.70; shows RESIST label; forces weapon swap
+- [x] **Unstable Core** (magenta) — cycles weakness element every 5s in Enemy.update; matching hit +50%
+- [x] **Bloodgorged** (dark red) — bleed ticks absorbed via `Enemy.absorbBleeding()` in StatusSystem
 
----
+### Monster "tells" library
+- [x] Identity/signature/counter documented on all enemies in code; telegraph times unchanged (620/900ms)
+- [x] Wiki monsters.md updated with identity columns and counter table
 
-## §22 — Companion / Ally NPC System
+### Research / Bestiary system (`src/systems/ResearchSystem.ts`)
+- [x] `ResearchEntry { enemyId, level: 0|1|2|3, kills, breaks }` interface in types/index.ts
+- [x] `MasteryEntry` and `AccountMeta.research/masteries/unlockedRecipes` added
+- [x] `ResearchSystem.recordKill(meta, id)` and `recordBreak(meta, id)` — breaks count 2×
+- [x] Rank thresholds: Lv1=5, Lv2=15, Lv3=30 (combined score)
+- [x] Research persists on AccountMeta (survives permadeath); forward-migrated in `loadAccountMeta()`
+- [x] "✦ Research Lv{n}: {Name}!" toast on kill/break that ranks up
+- [x] Bestiary tab in Adventurer's Guild panel: paginated, 5 per page, Lv-gated info reveal
+- [x] Lv0: name + progress; Lv1: +stats/archetype/body; Lv2: +counter/elemFamily; Lv3: +hitzones/lore
 
-- [ ] `CharacterAI` module (shared brain for companions, Hunter, shade)
-- [ ] AI alignment parameter (ally vs hostile)
-- [ ] Companion recruit via Caged Ally anomaly
-- [ ] Companion recruit via Guild in Town
-- [ ] Story companion "Old Friend" (secret boss unlock)
-- [ ] Companion roles (Tanker aggro, Archer poke, Sage heal)
-- [ ] Command wheel (Aggressive / Defensive / Follow / Hold / Focus / Regroup)
-- [ ] Companions consume their own potions; shareable at camp
-- [ ] Companion permanent death
-- [ ] Loyalty / banter system (affinity, camp dialogue, combat bonuses)
-- [ ] Companion fatigue (needs rest at camp)
-- [ ] Boss arenas that limit companions (e.g., Ascendant Twins = solo)
+### Acceptance criteria
+- [x] Killing a monster ranks its Research entry (AccountMeta.research updated on kill)
+- [x] Lv2 reveals counter/family in Bestiary
+- [x] Bestiary browsable at Guild in town (BESTIARY tab)
 
 ---
 
-## §23 — Town 2.0 (Expanded Hub)
+## P11 — Classes, Skill Trees & Bosses 2.0
 
-- [x] Dungeon Gate
-- [x] Blacksmith / Armory (basic buy/sell)
-- [x] Alchemist / Item Shop (Emporium)
-- [x] Inn (full HP/MP rest, paid)
-- [x] Chapel (basic NPC)
-- [x] Sage's Tower (respec stats; escalating gold cost, restores all level×5 points)
-- [ ] Sage's Tower enchanting (reroll affixes, socket runes, transmute) — needs §17
-- [ ] Adventurer's Guild (bounty board, hire companions, graveyard / run history)
-- [ ] Wandering stalls (daily-rotating rare vendor)
-- [ ] Bounty board (procedural bounties: kill X, break Y, reach floor Z)
-- [ ] Town NPC banter reacting to player progress
-- [ ] Hall of Champions display (victorious runs)
-- [ ] Checkpoint-floor start option at Gate (Option B, account-level)
+### Concrete skill trees (§E8.2)
+- [x] Tree shape: 3 branches × 4 tiers + 1 capstone; ~50 skill points to level 50
 
----
+**Swordman — Tempo / Guard / Blade**
+- [x] Blade branch: +slash MV, 3rd-light combo, Bleed-on-crit, *Crescent Lunge* (art)
+- [x] Guard branch: faster Riposte window, chip immunity, *Bulwark* (omni-guard 2s), counter-stagger
+- [x] Tempo branch: roll-cancel heavies, +stamina regen, *Momentum* (no-hit streak buffs atk), perfect-dodge → cooldown refund
+- [x] Capstone — **Perfect Tempo**: perfect dodge resets one skill cooldown
 
-## §24 — Economy, Loot Tables & Drop Rates
+**Archer — Precision / Volley / Survival**
+- [x] Precision branch: +weakpoint dmg, charged-shot crit, *Mark* (tagged foe +15%), *Deadeye* (charged weakpoint = part-break)
+- [x] Volley branch: multishot spread, *Rain of Arrows*, ricochet, +ammo retention
+- [x] Survival branch: backstep-shot (fire while dodging), move-while-aiming, *Trap Arrow*, +i-frames
+- [x] Capstone — **Hunter's Eye**: Research Lv of target adds bonus damage
 
-- [x] Gold as currency
-- [x] Basic drop table per enemy (item + chance)
-- [ ] Full weighted drop tables in `src/data/loot.ts`
-- [ ] Condition drops ("only if part broken", "only on Champion")
-- [ ] Floor number shifts table toward higher tiers
-- [ ] Pity / anti-streak mechanic (nudge weight on dry streaks)
-- [ ] Gold sinks balanced (upgrades, consumables, inn, reroll, hiring, warp crystals)
-- [ ] Optional inventory weight cap (Masochist toggle)
+**Tanker — Aegis / Provoke / Impact**
+- [x] Aegis branch: +block%, perfect-guard window, reflect chip, *Iron Stance*
+- [x] Provoke branch: AoE *Taunt*, threat mult, *Last Stand* (<25% HP +def), aggro-heal
+- [x] Impact branch: +KO build, *Shield Bash* (stun), *Ground Slam* (AoE topple), KO topple bonus dmg
+- [x] Capstone — **Immovable**: no knockback; perfect guard → stagger shockwave
 
----
+**Assassin — Shadow / Venom / Flow**
+- [x] Shadow branch: longer stealth, +backstab crit, vanish-on-kill, *Death Mark* execute
+- [x] Venom branch: poison/bleed on crit, +dmg vs ailing, *Rupture* (detonate stacks for burst), spread-on-kill
+- [x] Flow branch: +dodge i-frames, *Frenzy* uptime, dash-attack reset on kill, +crit dmg
+- [x] Capstone — **Lethality**: crits on wounded hitzone can instakill non-elite enemies
 
-## §25 — Floor 10, Endgame & Post-Death
+**Sage — Elements / Glyph / Mysticism**
+- [x] Elements branch: +magic MV, element swap stance, lingering ground hazard, *Meteor*
+- [x] Glyph branch: place runes, chain detonations, slow/heal zones, *Glyph Storm*
+- [x] Mysticism branch: MP efficiency, shields/heals (companions), *Cleanse*, *Mana Shield*
+- [x] Capstone — **Convergence**: detonating two elements on one target triggers big reaction
 
-- [ ] Floor 10 elite gauntlet corridor
-- [ ] Victory sequence (slow-mo finisher, credits-style epilogue)
-- [ ] Hall of Champions (permanent record across all characters)
-- [ ] Checkpoint-floor unlocks at Gate (Option A pure / Option B bonfire)
-- [ ] New Game+ / Ascension mode (harder dungeon, remixed bosses, hidden floor 11)
-- [ ] Lore frame ("dungeon resets reality on death") surfaced in world
+### Weapon arts (unlockable)
+- [x] Sword *Crescent Lunge*
+- [x] Greatsword *True Charge*
+- [x] Daggers *Shadowstep Flurry*
+- [x] Spear *Skewer* (multi-pierce)
+- [x] Bow *Rain of Arrows*
+- [x] Staff *Meteor*
+- [x] Tome *Glyph Storm*
 
----
+### Weapon mastery (account-meta)
+- [x] Per-family mastery level (survives death); uses tracked per run
+- [x] Minor passives unlock at mastery tiers (cap 5 per family)
 
-## §26 — Difficulty, Death & Permadeath UX
+### Specializations (mid-run pick at Floor 4 boss)
+- [x] *Slayer* — +dmg vs chosen body type
+- [x] *Elementalist* — +all element atk, −raw
+- [x] *Berserker* — lifesteal, +dmg at low HP
+- [x] *Sentinel* — guard/parry focus
+- [x] *Trapper* — deployables/throwables empowered
+- [x] Lock-in on pick; respec not available mid-run
 
-- [x] Permadeath (save deleted on death)
-- [x] Death → character creation loop
-- [ ] Death sequence: slow-mo + desaturate + frozen killing blow on screen
-- [ ] Cause-of-death banner ("Felled by Frost Warden Ysold — Floor 6 — Run #14 — 1h 22m")
-- [ ] Run summary screen (floors cleared, bosses slain, biggest hit, gold, rarest find)
-- [ ] `run_history` table in Supabase (never wiped, account-level)
-- [ ] Graveyard browser in Guild
-- [ ] Difficulty modifiers at character creation: Masochist, Ironbound, Starved, Hunted, Blackout
-- [ ] Cosmetic titles for stacked modifiers (recorded in Hall of Champions)
-- [ ] Local telemetry logging (what kills players + where) for balancing
+### Guard & parry per weapon (§E7.2)
+- [x] Spear: brace → counter-thrust guard
+- [x] Sword: *Riposte* active parry (tight window → guaranteed crit)
+- [x] Gauntlets: *Weave* parry (perfect-dodge counter)
+- [x] Greatsword: *Tackle* (dodge→heavy) with super-armor frames
 
----
+### Perfect-dodge reward (§E7.3)
+- [x] Inner i-frame window for "perfect dodge" — brief Focus state
+- [x] Focus: +crit on next hit, refund 10 stamina
+- [x] Ties into Sword Riposte and Gauntlet Flow
 
-## §27 — UI / HUD
+### Enemy feints (§E7.5)
+- [x] Tougher enemies occasionally feint (fake wind-up) or pause when pressured
 
-- [x] HP bar
-- [x] MP bar
-- [x] Gold display
-- [x] Floor number display
-- [x] Basic hotbar (consumable shortcuts)
-- [x] Stamina bar (yellow, between HP and MP)
-- [ ] Active ailment icons + remaining duration timers
-- [ ] Edge / ammo indicator
-- [ ] Skill cooldown pips
-- [ ] Minimap (corner, fog of war, marks warp pads / camps / anomalies)
-- [ ] Boss UI (named HP bar at top, part-break pips, phase indicator)
-- [ ] Damage numbers (color-coded: white normal, yellow crit, element-tinted, grey bounced)
-- [ ] Toggleable damage numbers
-- [ ] Telegraph feedback (screen-edge flash / directional indicator for off-screen wind-ups)
-- [ ] Full inventory grid (drag-drop)
-- [ ] Equipment paper-doll (stat diff green/red)
-- [ ] Hover tooltips (every status / affix / stat explained)
-- [ ] Map overlay (revealed-as-explored, hidden things stay hidden)
+### Bosses 2.0 (`src/data/bosses.ts`)
+- [x] **Forgefather Brand (F5)**: Phase 1 molten (weak Ice) → Phase 2 obsidian at 40% HP (armored, weak Blunt, fire-immune)
+- [x] **Frost Warden Ysold (F6)**: frozen (weak Fire) → blizzard phase (weak Radiant/Fire); break Ice Heart pre-enrage to skip blizzard
+- [x] **Riftmaw (F8)**: cycles void/neutral; void absorbs void weapons; rewards radiant
+- [x] 3–4 breakable parts on later bosses; breaking key part can skip/weaken enrage
+- [x] Phase weakness shown in HUD at Research Lv2
+- [x] **Tempered/Apex** boss variants (post-checkpoint, harder pattern + extra phase, mythic drops)
 
----
-
-## §28 — Audio
-
-- [ ] Per-floor ambient themes (10 floors)
-- [ ] Town music
-- [ ] Boss themes (10)
-- [ ] Anomaly spawn sting
-- [ ] Victory / death stings
-- [ ] Enemy wind-up SFX (the tells) per enemy type
-- [ ] Hit / bounce / parry / potion / footstep SFX
-- [ ] Hunter footstep ambient warning
-- [ ] Rift hum ambient warning
-- [ ] Blood Moon drone ambient warning
-- [ ] Damage SFX scaled by damage amount
-- [ ] "Bounce" clink on low Edge
-- [ ] Low-HP heartbeat
-- [ ] Potion drink glug (reminds player they're rooted)
-- [ ] Perfect-dodge / parry "ping"
-- [ ] Global volume + mute control
-- [ ] "Audio cues only" accessibility option
+### Acceptance criteria
+- [x] Each class plays ≥2 distinct ways via tree branches
+- [x] Brand's obsidian phase flips weakness mid-fight; player must adapt
+- [x] Breaking Ysold's Ice Heart demonstrably skips blizzard enrage
+- [x] Skill menu (K) shows real tree nodes with unlock state
 
 ---
 
-## §29 — Extended Data Models (TypeScript)
+## P12 — Dungeon Depth, Anomalies, Economy & Polish
 
-- [x] `RaceId`, `ClassId`, `Stats`, `CharacterSave` (v1)
-- [x] `ItemStack`, basic item interfaces
-- [ ] `Element`, `Ailment`, `WeaponFamily` types
-- [ ] `HitboxShape`, `AttackMove`, `WeaponMoveset`
-- [ ] `Rarity`, `EquipSlot`, `ItemKind`, `Affix`
-- [ ] `WeaponItem`, `ArmorItem`, `ConsumableItem` (full schemas)
-- [ ] `SkillNode`, `ClassSkillTree`
-- [ ] `AIRole`, `Hitzone`, `EnemyDef` (full with hitzones + attacks)
-- [ ] `EliteAffix`, `BossPhase`, `BossDef`
-- [ ] `CharacterAIProfile`
-- [ ] `AnomalyId`, `AnomalyDef`
-- [ ] `Companion`, `ActiveBuff`
-- [ ] `CharacterSaveV2` (superset of v1 + all new fields)
-- [ ] `RunHistoryEntry`, `AccountMeta`
-- [ ] `SaveManager` migration: v1 → v2
+### Room archetypes (`src/systems/FloorGenerator.ts`)
+- [ ] **Treasure Vault** — locked; Lockpick or elite key
+- [ ] **Arena** — doors seal; clear wave for loot
+- [ ] **Shrine** — one-time buff or risky bargain
+- [ ] **Library/Lore** — research notes, recipe unlocks, summon hints
+- [ ] **Rest Nook** — safe camp spot
+- [ ] **Hazard Room** — environmental gimmick
+- [ ] **Puzzle Room** — pressure-plate / light switch for reward
+- [ ] **Merchant Pocket** — in-floor stall
+- [ ] **Empty/Quiet** — pacing room
+- [ ] Director weights room types per floor number
+
+### Per-floor environmental hazards
+- [ ] F2 Flooded/Pond — water tiles everywhere (lightning floor)
+- [ ] F3 Fungal — spore clouds (poison build) + explosive puffballs
+- [ ] F5 Foundry — lava channels, oil pools, steam vents (fire reactions)
+- [ ] F6 Frozen — ice patches, thin ice (falls), blizzard low-visibility windows
+- [ ] F7 Catacombs — curse fog, collapsing tombs, gravetide spawners
+- [ ] F8 Void — drifting rifts (teleport/pull), gravity wells, phasing walls
+- [ ] F10 Throne — mix of all hazards (final exam)
+
+### Secrets & exploration
+- [ ] Hidden rooms (cracked walls; revealed by Detector Charm or bombs)
+- [ ] Secret warp shortcuts
+- [ ] Buried caches
+- [ ] Lore pages feeding secret-boss investigations
+
+### Floor 2 multi-biome enhancement
+- [ ] Each of 5 biomes carries element/hazard + biome-themed enemy pack
+- [ ] Consider small biome-boss mini-encounter per quadrant
+
+### Verticality-lite
+- [ ] Pits/ledges (one-way drops to skip ahead)
+- [ ] Breakable floors
+- [ ] Unlockable shortcuts back toward warp
+
+### Investigation system & secret bosses (§E11.1)
+- [ ] Clues surface through lore pages, Research rank-ups, NPC banter
+- [ ] `discoveredClues` tracked in `AccountMeta`
+- [ ] **The Gravelord** — light 4 black candles on one floor → necromancy set + summon-ally charm
+- [ ] **Avarice, the Gilded Maw** — enter cursed vault with ≥ X gold → *Gilded Fang*
+- [ ] **Clockwork Judge** — kill floor champion 0-damage then ring bell → time-slow rune
+- [ ] **Old Friend** — collect 3 journal pages, read at camp → permanent named companion
+- [ ] **The Hungering Dark** — clear a floor with no torch → void weapon line + radiant mat
+- [ ] **Aurelion** — track across 3 floors (flees) → Radiant infusion materials
+- [ ] Investigation log browsable in Guild
+
+### Hunter nemesis arc (§E11.2)
+- [ ] Escalating encounters: notes → stalking cues → invasions
+- [ ] `hunterState` (encounters, defeats, escalation) persisted on save
+- [ ] Hunter uses companion AI brain (aggressive: dodges, drinks potions, kites)
+- [ ] Beating Hunter drops unique weapon + `nemesis_mark`; fleeing costs gold/item, Hunter returns stronger
+- [ ] Optional finale encounter on F9
+
+### Rift depth (§E11.3)
+- [ ] Dimensional Rift → otherworld arena with remixed boss (inverted palette, harder pattern, Mythic mats)
+- [ ] Mirror Rift → fight your own build (Shade using your gear/skills); win = unique charm
+
+### Anomaly additions
+- [ ] **Wandering Merchant** (rare stock)
+- [ ] **Cursed Bargain** (power for permanent curse)
+- [ ] **Echo Duel** (past dead run)
+- [ ] **Beast Stampede**
+- [ ] Never stack two combat anomalies on one floor; always telegraph entry (tint + audio)
+
+### Conditional loot tables (§E12.1)
+- [ ] Drop conditions: on part-break, on Champion, on status-kill (frozen → extra crystal), on element-kill, research-gated rares
+
+### Salvage / disassemble & transmute
+- [ ] Break unwanted gear into materials
+- [ ] Transmute surplus low-tier mats → chance at higher tier (existing Sage's Tower)
+
+### Bounties 2.0 (§E12.4)
+- [ ] Break Ysold's antlers
+- [ ] Kill 10 undead with Radiant
+- [ ] Topple a brute
+- [ ] Clear Floor 5 without drinking a potion
+- [ ] Bounties reward jewels / mats / oils
+
+### Town 2.0 services
+- [ ] **Armory**: weapon element infusion (rune/mat), jewel socketing
+- [ ] **Chapel**: Radiant blessings, curse cleansing, set respawn-town-loadout template
+- [ ] **Guild**: Research/Bestiary terminal, bounty board, Hall of Champions, companion hire, investigation log
+- [ ] **Sage's Tower**: affix reroll, transmute, decoration (jewel) crafting, Research-Point spend
+
+### Companion depth
+- [ ] Element loadouts per companion (cover player matchup gap)
+- [ ] Command wheel: Aggressive / Defensive / Follow / Focus-target / Use-skill
+- [ ] Hardcore companions toggle (can die permanently — off by default)
+- [ ] Affinity unlocks small combat synergies + banter reactions
+
+### Run modifiers (§E14.1)
+- [ ] **Ironbound** — no Recall/Warp stones (already exists as `ironbound`)
+- [ ] **Starved** — −50% healing (already exists as `starved`)
+- [ ] **Hunted** — Hunter appears earlier/more often (already exists as `hunted`)
+- [ ] **Blackout** — −FOV (already exists as `blackout`)
+- [ ] **Glass** — ×2 damage taken, ×1.5 dealt
+- [ ] **Wrongfooted** — enemy weaknesses hidden even at Research Lv2
+- [ ] **Masochist** — durability + inventory weight on (already exists as `masochist`)
+
+### Accessibility (§E14.2)
+- [ ] Colorblind-safe element colors + icons (color + shape, not color alone)
+- [ ] Audio-cue option for tells
+- [ ] Adjustable text size
+- [ ] Optional bigger dodge i-frame assist (marked; disables leaderboard)
+- [ ] Remappable keys
+- [ ] "Telegraph emphasis" toggle (brightens wind-ups)
+
+### Acceptance criteria
+- [ ] Full descent shows varied room archetypes + floor hazard + rare anomaly
+- [ ] A learnable matchup arc is visible across floors 1–5
+- [ ] "What do I bring?" decision is load-bearing before each descent
 
 ---
 
-## §30 — Systems & Folder Structure
+## Cross-cutting tasks
 
-- [x] `src/systems/InputController.ts`
-- [x] `src/systems/FloorGenerator.ts`
-- [x] `src/systems/SaveManager.ts`
-- [x] `src/systems/Fov.ts`
-- [x] `src/lib/inventory.ts`
-- [ ] `src/systems/CombatSystem.ts` (tick, state machines, damage resolution)
-- [ ] `src/systems/StaminaSystem.ts`
-- [ ] `src/systems/AilmentSystem.ts` (status + elemental reactions)
-- [ ] `src/systems/EffectSystem.ts` (resolve consumable/skill effects)
-- [ ] `src/systems/LootSystem.ts` (roll drop tables)
-- [ ] `src/systems/InventorySystem.ts` (full grid + equip logic)
-- [ ] `src/systems/SkillSystem.ts` (trees, cooldowns, active skills)
-- [ ] `src/systems/AIController.ts` (enemy archetype behaviors)
-- [ ] `src/systems/CharacterAI.ts` (companions / Hunter / shade shared brain)
-- [ ] `src/systems/SpawnDirector.ts` (density + ambush + anomaly rolls)
-- [ ] `src/systems/AnomalySystem.ts` (registry + triggers)
-- [ ] `src/systems/CampSystem.ts` (rest, cook, ambush rolls)
-- [ ] `src/systems/CraftingSystem.ts` (upgrade trees, enchant, transmute)
-- [ ] `src/systems/EconomySystem.ts` (shops, bounties, prices)
-- [ ] `src/entities/Boss.ts`
-- [ ] `src/entities/Companion.ts`
-- [ ] `src/entities/Hunter.ts`
-- [ ] `src/entities/Projectile.ts` (proper entity)
-- [ ] `src/entities/Hitbox.ts`
-- [ ] `src/entities/RiftPortal.ts`
-- [ ] `src/entities/CampSite.ts`
-- [ ] `src/entities/Chest.ts`
-- [ ] `src/entities/Merchant.ts`
-- [ ] `src/scenes/InventoryScene.ts` (overlay)
-- [ ] `src/scenes/BossArenaScene.ts`
-- [ ] `src/scenes/OtherworldScene.ts` (rift arenas)
-- [ ] `src/scenes/DeathScene.ts` (death cam + run summary)
-- [ ] `src/scenes/HallOfChampionsScene.ts`
-- [ ] `src/data/weapons.ts` + `movesets.ts`
-- [ ] `src/data/skills.ts`
-- [ ] `src/data/enemies.ts` (full 40 defs with hitzones)
-- [ ] `src/data/bosses.ts`
-- [ ] `src/data/loot.ts`
-- [ ] `src/data/affixes.ts` + `sets.ts`
-- [ ] `src/data/anomalies.ts`
-- [ ] `src/data/meals.ts`
-- [ ] `src/data/bounties.ts`
-- [ ] `src/config.ts` expanded with `TUNING` object (§31)
+- [ ] `wiki/monsters.md` — update with affinity data, hitzones, new families
+- [ ] `wiki/items.md` — update with all new consumables, tonics, throwables, uniques, jewels, runes
+- [ ] `wiki/mechanics.md` — document damage pipeline, affinity charts, status-by-source table
+- [ ] `wiki/dungeon.md` — room archetypes, per-floor hazards, secrets system
+- [ ] `wiki/characters.md` — skill trees, specializations, weapon masteries
+- [ ] Type-check clean after every phase: `npx tsc --noEmit`
+- [ ] Save migration tested: existing saves load and default new fields correctly
 
 ---
 
-## §31 — Balancing (Tuning Knobs)
-
-- [x] `TUNING` constant object in `src/config.ts` (stamina, dodge frames, crit, poise, input buffer, spawn protection, knockback, potion channel)
-- [ ] Remaining TUNING knobs: guard window, level curve, edge decay, floor scaling, elite chance, anomaly weights, camp rest %, rarity weights
-- [ ] Difficulty dial (`difficultyMod` multiplier)
-- [ ] Telemetry-driven balance iterations
-
----
-
-## §32 — Content & Asset Checklist
-
-### Sprites / Atlases
-- [x] Player sprites (swordman, archer, tanker, assassin, sage — idle/walk/attack)
-- [x] Cave enemy sheets (goblin, bat, spider, skeleton, golem, troll — idle/walk)
-- [x] Floor 2 enemy sheets (forest, deadland, pond, rock themes)
-- [ ] All 5 races × 5 classes (4-dir, idle/walk/attack/hurt/die)
-- [ ] Weapon overlays per family (10) on player sprite
-- [ ] Elite tint variants for all enemies
-- [ ] 10 boss sheets (multi-phase, break-state variants)
-- [ ] Hunter + companion sheets (reuse player rig)
-- [ ] Anomaly visuals (rift portal, shrines, mimic, merchant, echo ghost)
-- [ ] Tilesets: remaining 8 floor themes + otherworld + camp props
-- [ ] Full item icons (weapons, armor, consumables, materials — 32×32 + 16×16 hotbar)
-- [ ] VFX (slashes, projectiles, elements, ailment overlays, perfect-dodge ping, break/shatter)
-
-### Audio
-- [ ] All items listed in §28
-
-### Data Content
-- [ ] ~10 weapons per family (upgrade trees)
-- [ ] ~6 armor sets per floor
-- [ ] Boss-part sets ×10
-- [ ] Affix pool (~30) + uniques (~20) + runes (~12)
-- [ ] Skill trees ×5 classes (13 nodes each)
-- [ ] Full enemy defs (~40) + drop tables
-- [ ] Boss defs ×10
-- [ ] Anomaly defs (~15)
-- [ ] Consumables / materials / meals / bounties tables
-
-### Systems Sign-off (§10 "Brutal but Fair" Contract)
-- [ ] Every enemy & boss attack is telegraphed (anticipation frame + SFX)
-- [ ] Spawn-protection (1.0s no damage after load) verified
-- [ ] Off-screen ranged attacks to player blocked
-- [ ] 0.3s input buffer on dodge/attack verified
-- [ ] Death cam + cause-of-death banner working
-- [ ] Run summary screen working
-- [ ] Permadeath wipe verified; account-meta survives the wipe
+*Last updated: 2026-06-13 · P7 + P8 complete · Next: P9 Item & Gear Flood*

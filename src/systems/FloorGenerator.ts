@@ -6,10 +6,17 @@ export const T_WALL         = 2;
 export const T_WARP         = 5;
 export const T_PILLAR       = 8;
 export const T_STONE        = 9;
-export const T_FLOOR_FOREST = 10;
-export const T_FLOOR_DEAD   = 11;
-export const T_FLOOR_POND   = 12;
-export const T_FLOOR_ROCK   = 13;
+export const T_FLOOR_FOREST  = 10;
+export const T_FLOOR_DEAD    = 11;
+export const T_FLOOR_POND    = 12;
+export const T_FLOOR_ROCK    = 13;
+export const T_FLOOR_FUNGAL   = 14; // floor 3 — fungal caverns
+export const T_FLOOR_BARRACKS = 15; // floor 4 — cursed barracks
+export const T_FLOOR_FOUNDRY  = 16; // floor 5 — forge foundry
+export const T_FLOOR_FROZEN   = 17; // floor 6 — frozen wastes
+export const T_FLOOR_CATACOMBS = 18; // floor 7 — catacombs
+export const T_FLOOR_VOID     = 19; // floor 8 — void rift
+export const T_FLOOR_THRONE   = 20; // floor 9-10 — throne halls
 
 export type TrapType = 'spike' | 'alarm' | 'net';
 
@@ -22,6 +29,13 @@ export interface AreaThemeRegion {
 
 export interface ChestPosition { col: number; row: number; }
 
+export type RoomArchetype = 'vault' | 'arena' | 'shrine' | 'library' | 'rest' | 'hazard' | 'puzzle' | 'merchant' | 'empty';
+
+export interface RoomData {
+  bounds: { x: number; y: number; w: number; h: number };
+  archetype: RoomArchetype;
+}
+
 export interface FloorData {
   tiles: number[][];
   spawnCol: number;
@@ -29,8 +43,28 @@ export interface FloorData {
   warpPositions: { col: number; row: number }[];
   trapPositions: TrapPosition[];
   chestPositions: ChestPosition[];
+  campPositions: { col: number; row: number }[];
   entryPoints?: { col: number; row: number }[];
   areaThemes?: AreaThemeRegion[];
+  rooms: RoomData[];
+}
+
+const ARCHETYPE_WEIGHTS: Record<number, Record<RoomArchetype, number>> = {
+  1: { empty: 60, rest: 15, shrine: 10, library: 10, puzzle: 5, vault: 0, arena: 0, hazard: 0, merchant: 0 },
+  2: { empty: 40, rest: 10, shrine: 10, library: 10, puzzle: 10, vault: 5, arena: 5, hazard: 5, merchant: 5 },
+  3: { empty: 30, rest: 10, shrine: 10, library: 10, puzzle: 10, vault: 8, arena: 10, hazard: 8, merchant: 4 },
+};
+
+function getWeightedArchetype(floor: number, rng: () => number): RoomArchetype {
+  const weights = ARCHETYPE_WEIGHTS[floor] || ARCHETYPE_WEIGHTS[3];
+  let total = 0;
+  for (const w of Object.values(weights)) total += w;
+  let r = rng() * total;
+  for (const [arch, w] of Object.entries(weights)) {
+    r -= w;
+    if (r <= 0) return arch as RoomArchetype;
+  }
+  return 'empty';
 }
 
 interface Rect { x: number; y: number; w: number; h: number; }
@@ -132,7 +166,9 @@ function roughenWalls(tiles: number[][], rng: () => number): void {
   const DIRS4: [number, number][] = [[-1,0],[1,0],[0,-1],[0,1]];
 
   const isFloor = (t: number) =>
-    t === T_FLOOR || t === T_FLOOR_FOREST || t === T_FLOOR_DEAD || t === T_FLOOR_POND || t === T_FLOOR_ROCK || t === T_STONE;
+    t === T_FLOOR || t === T_FLOOR_FOREST || t === T_FLOOR_DEAD || t === T_FLOOR_POND || t === T_FLOOR_ROCK ||
+    t === T_FLOOR_FUNGAL || t === T_FLOOR_BARRACKS || t === T_FLOOR_FOUNDRY || t === T_FLOOR_FROZEN ||
+    t === T_FLOOR_CATACOMBS || t === T_FLOOR_VOID || t === T_FLOOR_THRONE || t === T_STONE;
 
   const s1 = tiles.map(r => [...r]);
   for (let y = 1; y < rows - 1; y++) {
@@ -192,7 +228,9 @@ function placePillars(
   const DIRS4: [number, number][] = [[-1,0],[1,0],[0,-1],[0,1]];
 
   const isFloor = (t: number) =>
-    t === T_FLOOR || t === T_FLOOR_FOREST || t === T_FLOOR_DEAD || t === T_FLOOR_POND || t === T_FLOOR_ROCK || t === T_STONE;
+    t === T_FLOOR || t === T_FLOOR_FOREST || t === T_FLOOR_DEAD || t === T_FLOOR_POND || t === T_FLOOR_ROCK ||
+    t === T_FLOOR_FUNGAL || t === T_FLOOR_BARRACKS || t === T_FLOOR_FOUNDRY || t === T_FLOOR_FROZEN ||
+    t === T_FLOOR_CATACOMBS || t === T_FLOOR_VOID || t === T_FLOOR_THRONE || t === T_STONE;
 
   for (const room of rooms) {
     if (room === spawnRoom) continue;
@@ -262,7 +300,9 @@ function generateTraps(
   warpSet: Set<string>, rng: () => number, count: number,
 ): TrapPosition[] {
   const isFloor = (t: number) =>
-    t === T_FLOOR || t === T_FLOOR_FOREST || t === T_FLOOR_DEAD || t === T_FLOOR_POND || t === T_FLOOR_ROCK || t === T_STONE;
+    t === T_FLOOR || t === T_FLOOR_FOREST || t === T_FLOOR_DEAD || t === T_FLOOR_POND || t === T_FLOOR_ROCK ||
+    t === T_FLOOR_FUNGAL || t === T_FLOOR_BARRACKS || t === T_FLOOR_FOUNDRY || t === T_FLOOR_FROZEN ||
+    t === T_FLOOR_CATACOMBS || t === T_FLOOR_VOID || t === T_FLOOR_THRONE || t === T_STONE;
   const sc = center(spawnRoom);
   const pool: { col: number; row: number }[] = [];
   for (const room of rooms) {
@@ -286,13 +326,44 @@ function generateTraps(
   return traps;
 }
 
+/** Place one camp site per 5 rooms, preferring rooms far from spawn. */
+function generateCamps(
+  tiles: number[][], rooms: Rect[], spawnRoom: Rect,
+  warpSet: Set<string>, rng: () => number,
+): { col: number; row: number }[] {
+  const isFloor = (t: number) =>
+    t === T_FLOOR || t === T_FLOOR_FOREST || t === T_FLOOR_DEAD || t === T_FLOOR_POND || t === T_FLOOR_ROCK ||
+    t === T_FLOOR_FUNGAL || t === T_FLOOR_BARRACKS || t === T_FLOOR_FOUNDRY || t === T_FLOOR_FROZEN ||
+    t === T_FLOOR_CATACOMBS || t === T_FLOOR_VOID || t === T_FLOOR_THRONE || t === T_STONE;
+  const sc = center(spawnRoom);
+  const candidates = rooms
+    .filter(r => r !== spawnRoom)
+    .sort((a, b) => {
+      const ca = center(a), cb = center(b);
+      return (cb.x - sc.x) ** 2 + (cb.y - sc.y) ** 2 - ((ca.x - sc.x) ** 2 + (ca.y - sc.y) ** 2);
+    });
+  const camps: { col: number; row: number }[] = [];
+  for (let i = 0; i < candidates.length; i += ri(rng, 4, 6)) {
+    const c = center(candidates[i]);
+    const col = c.x + ri(rng, -1, 1);
+    const row = c.y + ri(rng, -1, 1);
+    if (col < 2 || row < 2 || col >= tiles[0].length - 2 || row >= tiles.length - 2) continue;
+    if (!isFloor(tiles[row][col])) continue;
+    if (warpSet.has(`${col},${row}`)) continue;
+    camps.push({ col, row });
+  }
+  return camps;
+}
+
 /** Place one chest per 6 rooms, preferring rooms far from spawn. */
 function generateChests(
   tiles: number[][], rooms: Rect[], spawnRoom: Rect,
   warpSet: Set<string>, rng: () => number,
 ): ChestPosition[] {
   const isFloor = (t: number) =>
-    t === T_FLOOR || t === T_FLOOR_FOREST || t === T_FLOOR_DEAD || t === T_FLOOR_POND || t === T_FLOOR_ROCK || t === T_STONE;
+    t === T_FLOOR || t === T_FLOOR_FOREST || t === T_FLOOR_DEAD || t === T_FLOOR_POND || t === T_FLOOR_ROCK ||
+    t === T_FLOOR_FUNGAL || t === T_FLOOR_BARRACKS || t === T_FLOOR_FOUNDRY || t === T_FLOOR_FROZEN ||
+    t === T_FLOOR_CATACOMBS || t === T_FLOOR_VOID || t === T_FLOOR_THRONE || t === T_STONE;
   const sc = center(spawnRoom);
   const candidates = rooms
     .filter(r => r !== spawnRoom)
@@ -313,9 +384,22 @@ function generateChests(
   return chests;
 }
 
+// ── Floor tile theme map ──────────────────────────────────────────────────────
+const FLOOR_THEME_TILE: Record<number, number> = {
+  3: T_FLOOR_FUNGAL,
+  4: T_FLOOR_BARRACKS,
+  5: T_FLOOR_FOUNDRY,
+  6: T_FLOOR_FROZEN,
+  7: T_FLOOR_CATACOMBS,
+  8: T_FLOOR_VOID,
+  9: T_FLOOR_THRONE,
+  10: T_FLOOR_THRONE,
+  11: T_FLOOR_THRONE,
+};
+
 // ── Floor 1 / 3-10 generator ─────────────────────────────────────────────────
 
-function generateFloor1Plus(seed: number): FloorData {
+function generateFloor1Plus(seed: number, floor = 1): FloorData {
   const cols = DUNGEON_COLS, rows = DUNGEON_ROWS;
   const rng  = mulberry32(seed);
   const tiles: number[][] = Array.from({ length: rows }, () => new Array(cols).fill(T_WALL));
@@ -345,10 +429,42 @@ function generateFloor1Plus(seed: number): FloorData {
   placePillars(tiles, rooms, spawnRoom, warpSet, rng);
   placeStones(tiles, rooms, spawnRoom, rng);
 
+  // Re-theme floor tiles for floors 3+
+  const themeTile = FLOOR_THEME_TILE[floor];
+  if (themeTile !== undefined) {
+    for (let y = 0; y < rows; y++)
+      for (let x = 0; x < cols; x++)
+        if (tiles[y][x] === T_FLOOR) tiles[y][x] = themeTile;
+  }
+
   const trapPositions  = generateTraps(tiles, rooms, spawnRoom, warpSet, rng, Math.max(15, rooms.length));
   const chestPositions = generateChests(tiles, rooms, spawnRoom, warpSet, rng);
+  const campPositions  = generateCamps(tiles, rooms, spawnRoom, warpSet, rng);
 
-  return { tiles, spawnCol: spawnC.x, spawnRow: spawnC.y, warpPositions, trapPositions, chestPositions };
+  const roomsData: RoomData[] = [];
+  for (const r of rooms) {
+    let arch: RoomArchetype = 'empty';
+    if (r === spawnRoom) {
+      arch = 'empty';
+    } else {
+      arch = getWeightedArchetype(floor, rng);
+    }
+    roomsData.push({
+      bounds: { x: r.x, y: r.y, w: r.w, h: r.h },
+      archetype: arch,
+    });
+  }
+
+  return {
+    tiles,
+    spawnCol: spawnC.x,
+    spawnRow: spawnC.y,
+    warpPositions,
+    trapPositions,
+    chestPositions,
+    campPositions,
+    rooms: roomsData
+  };
 }
 
 // ── Floor 2 four-area generator ──────────────────────────────────────────────
@@ -462,13 +578,120 @@ function generateFloor2(seed: number): FloorData {
   // Traps (more traps on floor 2)
   const trapPositions  = generateTraps(tiles, allRooms, hubRoom, warpSet, rng, Math.max(40, allRooms.length * 2));
   const chestPositions = generateChests(tiles, allRooms, hubRoom, warpSet, rng);
+  const campPositions  = generateCamps(tiles, allRooms, hubRoom, warpSet, rng);
 
   const spawnCol = cx + 2;
   const spawnRow = cy + 2;
 
+  const roomsData: RoomData[] = [];
+  for (let qi = 0; qi < 4; qi++) {
+    for (const r of allQuadRooms[qi]) {
+      const arch = getWeightedArchetype(2, rng);
+      roomsData.push({
+        bounds: { x: r.x, y: r.y, w: r.w, h: r.h },
+        archetype: arch,
+      });
+    }
+  }
+  roomsData.push({
+    bounds: { x: hubRoom.x, y: hubRoom.y, w: hubRoom.w, h: hubRoom.h },
+    archetype: 'empty',
+  });
+
   return {
-    tiles, spawnCol, spawnRow, warpPositions, trapPositions, chestPositions, entryPoints,
+    tiles, spawnCol, spawnRow, warpPositions, trapPositions, chestPositions, campPositions, entryPoints,
     areaThemes: quads.map(q => ({ region: { x: q.x, y: q.y, w: q.w, h: q.h }, theme: q.theme })),
+    rooms: roomsData,
+  };
+}
+
+// ── Floor 10 / 11 linear gauntlet corridor generator ──────────────────────────
+function generateFloor10(seed: number): FloorData {
+  const cols = DUNGEON_COLS, rows = DUNGEON_ROWS;
+  const rng  = mulberry32(seed);
+  const tiles: number[][] = Array.from({ length: rows }, () => new Array(cols).fill(T_WALL));
+
+  const midY = Math.floor(rows / 2);
+  const startX = 40;
+  const endX = 300;
+  const corridorHalfWidth = 3;
+
+  // Carve corridor
+  for (let x = startX; x <= endX; x++) {
+    for (let y = midY - corridorHalfWidth; y <= midY + corridorHalfWidth; y++) {
+      tiles[y][x] = T_FLOOR;
+    }
+  }
+
+  // Boss Arena at the end:
+  const arenaRadius = 15;
+  const arenaCenterX = endX + arenaRadius + 2;
+  const arenaCenterY = midY;
+
+  for (let y = arenaCenterY - arenaRadius; y <= arenaCenterY + arenaRadius; y++) {
+    for (let x = arenaCenterX - arenaRadius; x <= arenaCenterX + arenaRadius; x++) {
+      if (Math.sqrt((x - arenaCenterX) ** 2 + (y - arenaCenterY) ** 2) <= arenaRadius + 0.5) {
+        tiles[y][x] = T_FLOOR;
+      }
+    }
+  }
+
+  // Warp pad in center of arena
+  tiles[arenaCenterY][arenaCenterX] = T_WARP;
+  const warpPositions = [{ col: arenaCenterX, row: arenaCenterY, padIndex: 0 }];
+  const warpSet = new Set([`${arenaCenterX},${arenaCenterY}`]);
+
+  const spawnCol = startX + 5;
+  const spawnRow = midY;
+
+  // Chests along corridor
+  const chestPositions = [
+    { col: startX + 50, row: midY - 2 },
+    { col: startX + 100, row: midY + 2 },
+    { col: startX + 180, row: midY - 2 },
+  ];
+
+  // Camp position
+  const campPositions = [
+    { col: startX + 140, row: midY },
+  ];
+
+  // Pillars around the arena perimeter (inside)
+  for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 4) {
+    const px = Math.round(arenaCenterX + Math.cos(angle) * (arenaRadius - 4));
+    const py = Math.round(arenaCenterY + Math.sin(angle) * (arenaRadius - 4));
+    tiles[py][px] = T_PILLAR;
+  }
+
+  // Traps along corridor
+  const trapPositions: TrapPosition[] = [];
+  for (let x = startX + 25; x < endX - 10; x += 35) {
+    trapPositions.push({ col: x, row: midY - 1, type: 'spike' });
+    trapPositions.push({ col: x + 10, row: midY + 1, type: 'net' });
+    trapPositions.push({ col: x + 20, row: midY, type: 'alarm' });
+  }
+
+  const roomsData: RoomData[] = [
+    {
+      bounds: {
+        x: arenaCenterX - arenaRadius,
+        y: arenaCenterY - arenaRadius,
+        w: arenaRadius * 2,
+        h: arenaRadius * 2
+      },
+      archetype: 'empty'
+    }
+  ];
+
+  return {
+    tiles,
+    spawnCol,
+    spawnRow,
+    warpPositions,
+    trapPositions,
+    chestPositions,
+    campPositions,
+    rooms: roomsData,
   };
 }
 
@@ -476,5 +699,6 @@ function generateFloor2(seed: number): FloorData {
 
 export function generateFloor(seed: number, floor = 1): FloorData {
   if (floor === 2) return generateFloor2(seed);
-  return generateFloor1Plus(seed);
+  if (floor === 10 || floor === 11) return generateFloor10(seed);
+  return generateFloor1Plus(seed, floor);
 }

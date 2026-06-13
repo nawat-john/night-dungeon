@@ -6,6 +6,7 @@ import { CharacterSave, ClassId, Stats, ItemInstance } from '../types';
 import { StatusSystem, Ailment } from '../systems/StatusSystem';
 import { ITEMS, AttackType } from '../data/items';
 import { WeaponFamily, WeaponMoveset, AttackMove, getMoveset } from '../data/movesets';
+import { AudioManager } from '../systems/AudioManager';
 
 export type Facing = 'down' | 'up' | 'left' | 'right';
 export type CombatState = 'idle' | 'startup' | 'active' | 'recovery' | 'dodge' | 'hitstun' | 'channel';
@@ -122,9 +123,19 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   activeCoating: 'none' | 'power' | 'poison' | 'paralyze' = 'none'; // Archer
   bastionModeActive = false; // Tanker
   stealthActive = false; // Assassin
-  activeElement: 'fire' | 'ice' | 'lightning' = 'fire'; // Sage
+  activeElement: 'fire' | 'ice' | 'lightning' | 'void' | 'radiant' = 'fire'; // Sage — §E15 adds void/radiant
 
   private mpRegenAccum = 0;
+
+  // §P11 — Perfect-dodge Focus state
+  focusMs = 0;
+
+  // §P11 — Active specialization (loaded from save)
+  specialization = '';
+
+  // §P11 — Mastery bonus multiplier (recomputed on weapon switch / equip)
+  masteryDmgMult = 1.0;
+  masteryCritBonus = 0;
 
   // Public stats
   currentHp  = 100;
@@ -153,6 +164,9 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   // §17 additions
   savedStats: Stats = { hp: 100, mp: 30, str: 5, dex: 5, int: 5, vit: 5, agi: 5 };
   masochist = false;
+  starved = false;
+  glass = false;
+  wrongfooted = false;
 
   hasSetBonus(setName: string, count: number): boolean {
     return (this.setCounts[setName] ?? 0) >= count;
@@ -163,6 +177,8 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
   attackType: AttackType = 'melee';
   classKey: ClassId = 'swordman';
+  /** Animation key prefix — `${classKey}` for humans, `${race}_${classKey}` for others. */
+  animPrefix: string = 'swordman';
 
   weapon1Id: string | null = null;
   weapon2Id: string | null = null;
@@ -198,6 +214,12 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     const f = this.activeFamily;
     const usesEdge = f === 'sword' || f === 'greatsword' || f === 'mace' || f === 'spear';
     return usesEdge && this.edgeGauge < TUNING.gauge.edgeBluntThresh;
+  }
+
+  /** §E15 — Physical damage category of the active weapon for PHYS_CHART lookup. */
+  getActivePhysType(): import('../types').PhysType {
+    const activeId = this.activeWeaponSlot === 0 ? this.weapon1Id : this.weapon2Id;
+    return (activeId ? ITEMS[activeId]?.physType : undefined) ?? 'slash';
   }
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
@@ -367,6 +389,14 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     const effDex = totalDex <= 60 ? totalDex : 60 + (totalDex - 60) * 0.6;
     this.attackDmg      = Math.max(6, Math.floor(effStr * 3 + effDex)) + baseWepAtk + addAtk;
 
+    if (this.getData('shrine_buff')) {
+      this.attackDmg = Math.round(this.attackDmg * 1.25);
+      this.defense = Math.round(this.defense * 1.25);
+    }
+    if (this.glass) {
+      this.attackDmg = Math.round(this.attackDmg * 1.5);
+    }
+
     // Weight penalties
     let weightSpeedMult = 1.0;
     let weightRollMult = 2.0;
@@ -383,6 +413,11 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     this.totalWeight = totalWeight;
     this.lifestealPct = addLifesteal;
 
+    // §P11 — Specialization passives (stat bonuses)
+    if (this.specialization === 'berserker') {
+      this.lifestealPct += 3; // +3% lifesteal
+    }
+
     // Clamp current values to new maxima
     this.currentHp      = Math.min(this.currentHp,  this.maxHp);
     this.currentMp      = Math.min(this.currentMp,  this.maxMp);
@@ -398,6 +433,14 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
   loadFromSave(save: CharacterSave): void {
     this.masochist         = save.masochist ?? false;
+    this.starved            = save.starved ?? false;
+    this.glass              = save.glass ?? false;
+    this.wrongfooted        = save.wrongfooted ?? false;
+    this.setData('ironbound', save.ironbound ?? false);
+    this.setData('hunted', save.hunted ?? false);
+    this.setData('blackout', save.blackout ?? false);
+    this.setData('glass', save.glass ?? false);
+    this.setData('wrongfooted', save.wrongfooted ?? false);
     this.gold              = save.gold;
     this.exp               = save.exp ?? 0;
     this.level             = save.level;
@@ -405,6 +448,10 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     this.unspentSkillPoints = save.unspentSkillPoints ?? 0;
     this.unlockedSkills    = save.unlockedSkills ?? [];
     this.classKey          = save.clazz;
+    // §P11 — Specialization
+    this.specialization    = save.specialization ?? '';
+    // Focus state resets on load
+    this.focusMs           = 0;
 
     // Reset active skill/stance states on load
     this.skillCooldowns.clear();
@@ -457,8 +504,10 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     this.activeWeaponSlot  = save.activeWeaponSlot ?? 0;
     this.attackType        = this.deriveAttackType(save);
     this.canBlock          = save.clazz === 'tanker' || (offhand ? offhand.itemId === 'round_shield' : false);
-    this.setTexture(`player_${save.clazz}`, 'idle_down_0');
-    this.play(`${save.clazz}_idle_down`);
+    const texKey   = save.race === 'human' ? `player_${save.clazz}` : `player_${save.race}_${save.clazz}`;
+    this.animPrefix = save.race === 'human' ? save.clazz : `${save.race}_${save.clazz}`;
+    this.setTexture(texKey, 'idle_down_0');
+    this.play(`${this.animPrefix}_idle_down`);
     this.refreshMoveset();
   }
 
@@ -535,6 +584,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     this.comboWindowMs = 0;
     this.comboReady = false;
     this.emitGaugeEvent();
+    this.refreshMasteryBonus();
   }
 
   switchWeapon(): void {
@@ -554,7 +604,15 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   }
 
   takeDamage(amount: number, fromX?: number, fromY?: number, element?: string): void {
-    if (this.isInvulnerable) return;
+    if (this.isInvulnerable) {
+      if (this.combatState === 'dodge') {
+        if (!this.getData('perfectDodgeTriggered')) {
+          this.setData('perfectDodgeTriggered', true);
+          this.scene.game.events.emit('perfect-dodge', { x: this.x, y: this.y });
+        }
+      }
+      return;
+    }
 
     // Swordman active parry (Riposte Stance)
     if (this.classKey === 'swordman' && this.riposteStanceMs > 0) {
@@ -615,8 +673,12 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
         this.scene.game.events.emit('hud-update', this);
         return;
       }
-      // Regular guard: 10% chip damage, stamina drain
-      const chip = Math.max(1, Math.ceil(dmg * (1 - TUNING.guard.blockPct)));
+      // Regular guard: chip damage, stamina drain
+      let blockPct: number = TUNING.guard.blockPct;
+      if (this.specialization === 'sentinel') {
+        blockPct = Math.min(1.0, blockPct + 0.20);
+      }
+      const chip = Math.max(1, Math.ceil(dmg * (1 - blockPct)));
       this.spendStamina(Math.max(2, Math.ceil(amount * TUNING.guard.staminaCostFactor)));
       if (this.isExhausted) {
         // Guard broken — full damage
@@ -625,11 +687,20 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
       } else {
         dmg = chip;
       }
+      AudioManager.playSFX('bounce');
+    }
+
+    if (this.glass) {
+      dmg *= 2;
     }
 
     this.currentHp = Math.max(0, this.currentHp - dmg);
     if (dmg > 0) {
       this.decayArmorDurability();
+      this.scene.game.events.emit('player-hit');
+      if (!this.guardActive) {
+        AudioManager.playSFX('hit');
+      }
     }
     this.iframesMs = IFRAMES_DURATION;
 
@@ -664,7 +735,9 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   }
 
   heal(amount: number): void {
-    this.currentHp = Math.min(this.maxHp, this.currentHp + amount);
+    let healAmt = amount;
+    if (this.starved) healAmt = Math.floor(healAmt * 0.5);
+    this.currentHp = Math.min(this.maxHp, this.currentHp + healAmt);
     this.scene.game.events.emit('hud-update', this);
   }
 
@@ -723,9 +796,22 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     return true;
   }
 
+  /** §P11 — Apply perfect-dodge Focus state: +15% crit on next hit, +10 stamina. */
+  applyFocusState(): void {
+    this.focusMs = 3000;
+    this.stamina = Math.min(this.maxStamina, this.stamina + 10);
+  }
+
   /** Compute attack damage: MV × physAtk × STR scale × crit, with soft cap. */
   computeAttackDamage(mv: number): { dmg: number; isCrit: boolean } {
     let critChancePct = TUNING.crit.baseChancePct + this.agi * TUNING.crit.perAgiPct;
+    // §P11 — Focus state: +15% crit on next hit
+    if (this.focusMs > 0) {
+      critChancePct += 15;
+      this.focusMs = 0; // consume on first use
+    }
+    // §P11 — Mastery crit bonus
+    critChancePct += this.masteryCritBonus;
     // Assassin passives
     if (this.classKey === 'assassin' && this.isSkillUnlocked('assa_b3_t1')) {
       critChancePct += 20; // Opportunist: +20% crit chance
@@ -777,9 +863,30 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     const baseDmg = this.attackDmg * strScale;
     let finalDmg = Math.max(1, Math.round(mv * baseDmg * (isCrit ? critMult : 1.0)));
 
+    // §P11 — Mastery damage multiplier
+    finalDmg = Math.round(finalDmg * this.masteryDmgMult);
+
+    // §P11 — Elementalist spec: -10% raw physical (boss hits handled in DungeonScene for elem bonus)
+    if (this.specialization === 'elementalist') {
+      finalDmg = Math.round(finalDmg * 0.90);
+    }
+
+    // §P11 — Berserker spec: +15% dmg when below 50% HP
+    if (this.specialization === 'berserker' && this.currentHp < this.maxHp * 0.5) {
+      finalDmg = Math.round(finalDmg * 1.15);
+    }
+
     // Swordman combo passive
     if (this.classKey === 'swordman' && this.isSkillUnlocked('sword_b1_t2') && this.comboStep === 2) {
       finalDmg = Math.round(finalDmg * 1.20); // Blade Combo: +20% on 3rd light hit
+    }
+
+    const save = SaveManager.load();
+    if (save) {
+      if (!save.biggestHit || finalDmg > save.biggestHit) {
+        save.biggestHit = finalDmg;
+        SaveManager.write(save);
+      }
     }
 
     return { dmg: finalDmg, isCrit };
@@ -787,25 +894,53 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
   // ── §13 — Edge gauge ──────────────────────────────────────────────────────
 
+  /** §13 — When a melee swing connects, decay edge and track weapon mastery. */
   onMeleeHitConnected(): void {
     const ms = this.activeMoveset;
     if (!ms) return;
     let decay = ms.edgeDecayPerHit ?? 0;
     if (decay <= 0) return;
 
-    // Swordman Sharp Blade passive: 30% slower edge decay
+    // Swordman Sharp Blade/Bleed on Crit passive: 30% slower edge decay
     if (this.classKey === 'swordman' && this.isSkillUnlocked('sword_b1_t3')) {
       decay = Math.max(1, Math.round(decay * 0.70));
     }
 
     this.edgeGauge = Math.max(0, this.edgeGauge - decay);
     this.emitGaugeEvent();
+
+    // §P11 — Track weapon mastery use
+    const family = this.activeFamily;
+    if (family) {
+      SaveManager.updateMastery(family);
+      this.refreshMasteryBonus();
+    }
+  }
+
+  /** §P11 — Ranged hit connected: track weapon mastery. */
+  onRangedHitConnected(): void {
+    const family = this.activeFamily;
+    if (family) {
+      SaveManager.updateMastery(family);
+      this.refreshMasteryBonus();
+    }
   }
 
   /** §13 — Whetstone consumable: restore edge gauge to full. */
   restoreEdge(): void {
     this.edgeGauge = TUNING.gauge.edgeMax;
     this.emitGaugeEvent();
+  }
+
+  /** §P11 — Recompute mastery bonus multiplier for the current weapon family. */
+  refreshMasteryBonus(): void {
+    const family = this.activeFamily;
+    if (!family) { this.masteryDmgMult = 1.0; this.masteryCritBonus = 0; return; }
+    const lvl = SaveManager.getMasteryLevel(family);
+    // Lv1: +3%, Lv2: +5%, Lv3: +8%, Lv4: +10%, Lv5: +12% + 5% crit
+    const dmgBonuses = [0, 0.03, 0.05, 0.08, 0.10, 0.12];
+    this.masteryDmgMult = 1 + (dmgBonuses[lvl] ?? 0);
+    this.masteryCritBonus = lvl >= 5 ? 5 : 0;
   }
 
   /** §13 — Gauntlets: add a Flow stack (called on perfect dodge). */
@@ -1076,6 +1211,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     this.combatState = 'dodge';
     this.stateTimer = TUNING.dodge.totalMs;
     this.dodgeElapsed = 0;
+    this.setData('perfectDodgeTriggered', false);
     this.lockedFacing = null;
     this.knockbackVx = 0;
     this.knockbackVy = 0;
@@ -1106,6 +1242,43 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   }
 
   update(_time: number, delta: number): void {
+    // Handle footstep sounds
+    if (this.active && (this.combatState === 'idle' || this.combatState === 'recovery' || this.combatState === 'dodge')) {
+      const b = this.body as Phaser.Physics.Arcade.Body;
+      if (b && (Math.abs(b.velocity.x) > 8 || Math.abs(b.velocity.y) > 8)) {
+        if (this.getData('footstepTimer') === undefined) {
+          this.setData('footstepTimer', 0);
+        }
+        let ft = this.getData('footstepTimer') as number;
+        ft -= delta;
+        if (ft <= 0) {
+          AudioManager.playSFX('footstep');
+          ft = 350;
+        }
+        this.setData('footstepTimer', ft);
+      } else {
+        this.setData('footstepTimer', 0);
+      }
+    } else {
+      this.setData('footstepTimer', 0);
+    }
+
+    // Handle potion/whetstone glug channel sound
+    if (this.active && this.combatState === 'channel') {
+      if (this.getData('channelGlugTimer') === undefined) {
+        this.setData('channelGlugTimer', 0);
+      }
+      let cgt = this.getData('channelGlugTimer') as number;
+      cgt -= delta;
+      if (cgt <= 0) {
+        AudioManager.playSFX('potion_glug');
+        cgt = 380;
+      }
+      this.setData('channelGlugTimer', cgt);
+    } else {
+      this.setData('channelGlugTimer', 0);
+    }
+
     // Tick timers
     this.iframesMs        = Math.max(0, this.iframesMs - delta);
     this.slowMs           = Math.max(0, this.slowMs - delta);
@@ -1116,6 +1289,8 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     this.bufferDodge      = Math.max(0, this.bufferDodge - delta);
     this.perfectGuardMs   = Math.max(0, this.perfectGuardMs - delta);
     this.comboWindowMs    = Math.max(0, this.comboWindowMs - delta);
+    // §P11 — Focus state timer
+    if (this.focusMs > 0) this.focusMs = Math.max(0, this.focusMs - delta);
 
     // §14 active skill cooldowns tick
     for (const [id, ms] of this.skillCooldowns.entries()) {
@@ -1216,7 +1391,11 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
     // Guard: perfect-guard window opens on G just-pressed
     if (Phaser.Input.Keyboard.JustDown(this.guardKey) && this.canBlock && this.combatState === 'idle') {
-      this.perfectGuardMs = TUNING.guard.perfectWindowMs;
+      let windowMs = TUNING.guard.perfectWindowMs;
+      if (this.specialization === 'sentinel') {
+        windowMs += 50;
+      }
+      this.perfectGuardMs = windowMs;
     }
     this.guardActive = this.guardKey.isDown && this.canBlock && this.combatState === 'idle';
 
@@ -1489,7 +1668,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
         }
       });
     } else if (skillId === 'sage_element_swap') {
-      const cycle: ('fire' | 'ice' | 'lightning')[] = ['fire', 'ice', 'lightning'];
+      const cycle: ('fire' | 'ice' | 'lightning' | 'void' | 'radiant')[] = ['fire', 'ice', 'lightning', 'void', 'radiant'];
       const curIdx = cycle.indexOf(this.activeElement);
       this.activeElement = cycle[(curIdx + 1) % cycle.length];
     }
@@ -1498,9 +1677,23 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   private updateAnim(moving: boolean): void {
     const displayFacing = this.lockedFacing ?? this.facing;
     const animDir = (displayFacing === 'left' || displayFacing === 'right') ? 'side' : displayFacing;
-    const clip    = moving ? `walk_${animDir}` : `idle_${animDir}`;
-    const fullKey = `${this.classKey}_${clip}`;
-    if (this.anims.currentAnim?.key !== fullKey) this.play(fullKey);
     this.setFlipX(displayFacing === 'left');
+
+    let clip: string;
+    if (this.combatState === 'startup' || this.combatState === 'active') {
+      clip = `attack_${animDir}`;
+    } else if (this.combatState === 'hitstun') {
+      clip = 'hurt';
+    } else {
+      clip = moving ? `walk_${animDir}` : `idle_${animDir}`;
+    }
+
+    const fullKey = `${this.animPrefix}_${clip}`;
+    if (this.anims.currentAnim?.key !== fullKey) this.play(fullKey);
+  }
+
+  playDeathAnim(): void {
+    const fullKey = `${this.animPrefix}_die`;
+    if (this.scene.anims.exists(fullKey)) this.play(fullKey);
   }
 }

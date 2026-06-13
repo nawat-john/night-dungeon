@@ -21,7 +21,19 @@ export class CharacterCreateScene extends Phaser.Scene {
   private confirmKey!: Phaser.Input.Keyboard.Key;
   private backKey!: Phaser.Input.Keyboard.Key;
   private mKey!: Phaser.Input.Keyboard.Key;
+  private iKey!: Phaser.Input.Keyboard.Key;
+  private sKey!: Phaser.Input.Keyboard.Key;
+  private hKey!: Phaser.Input.Keyboard.Key;
+  private bKey!: Phaser.Input.Keyboard.Key;
+  private gKey!: Phaser.Input.Keyboard.Key;
+  private oKey!: Phaser.Input.Keyboard.Key;
   private masochistMode = false;
+  private ironboundMode = false;
+  private starvedMode = false;
+  private huntedMode = false;
+  private blackoutMode = false;
+  private glassMode = false;
+  private wrongfootedMode = false;
 
   constructor() { super('CharacterCreateScene'); }
 
@@ -33,6 +45,12 @@ export class CharacterCreateScene extends Phaser.Scene {
     this.backKey    = keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.cursor     = keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.W);
     this.mKey       = keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.M);
+    this.iKey       = keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.I);
+    this.sKey       = keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S);
+    this.hKey       = keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.H);
+    this.bKey       = keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.B);
+    this.gKey       = keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.G);
+    this.oKey       = keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.O);
 
     this.cameras.main.setBackgroundColor('#0d0b14');
     const { width, height } = this.cameras.main;
@@ -53,9 +71,26 @@ export class CharacterCreateScene extends Phaser.Scene {
       this.confirm();
     } else if (Phaser.Input.Keyboard.JustDown(this.backKey)) {
       this.goBack();
-    } else if (this.step === 'confirm' && Phaser.Input.Keyboard.JustDown(this.mKey)) {
-      this.masochistMode = !this.masochistMode;
-      this.renderStep();
+    } else if (this.step === 'confirm') {
+      if (Phaser.Input.Keyboard.JustDown(this.mKey)) {
+        this.masochistMode = !this.masochistMode;
+        this.renderStep();
+      } else if (Phaser.Input.Keyboard.JustDown(this.iKey)) {
+        this.ironboundMode = !this.ironboundMode;
+        this.renderStep();
+      } else if (Phaser.Input.Keyboard.JustDown(this.sKey)) {
+        this.starvedMode = !this.starvedMode;
+        this.renderStep();
+      } else if (Phaser.Input.Keyboard.JustDown(this.hKey)) {
+        this.huntedMode = !this.huntedMode;
+        this.renderStep();
+      } else if (Phaser.Input.Keyboard.JustDown(this.gKey)) {
+        this.glassMode = !this.glassMode;
+        this.renderStep();
+      } else if (Phaser.Input.Keyboard.JustDown(this.oKey)) {
+        this.wrongfootedMode = !this.wrongfootedMode;
+        this.renderStep();
+      }
     }
   }
 
@@ -151,20 +186,24 @@ export class CharacterCreateScene extends Phaser.Scene {
       const final = this.mergeStats(cls.baseStats, race.modifiers);
 
       const lines = [
-        `Race:  ${race.name}`,
-        `Class: ${cls.name}`,
+        `Race:  ${race.name}    Class: ${cls.name}`,
         `HP: ${final.hp}  MP: ${final.mp}`,
-        `STR:${final.str}  DEX:${final.dex}  INT:${final.int}`,
-        `VIT:${final.vit}  AGI:${final.agi}`,
-        `Difficulty: ${this.masochistMode ? 'MASOCHIST (Durability Decay)' : 'STANDARD'}`,
-        `[M] key toggles Difficulty`,
+        `STR:${final.str}  DEX:${final.dex}  INT:${final.int}  VIT:${final.vit}  AGI:${final.agi}`,
+        `Title: [ ${this.getCosmeticTitle().toUpperCase()} ]`,
+        `[M] Masochist:   [${this.masochistMode ? 'X' : ' '}] (Durability & Weight)`,
+        `[I] Ironbound:    [${this.ironboundMode ? 'X' : ' '}] (Disable Warp Crystals)`,
+        `[S] Starved:      [${this.starvedMode ? 'X' : ' '}] (Halve All Healing)`,
+        `[H] Hunted:       [${this.huntedMode ? 'X' : ' '}] (Early Nemesis Spawn)`,
+        `[B] Blackout:     [${this.blackoutMode ? 'X' : ' '}] (Reduced FOV Radius)`,
+        `[G] Glass:        [${this.glassMode ? 'X' : ' '}] (2x Damage Taken, 1.5x Dealt)`,
+        `[O] Wrongfooted:  [${this.wrongfootedMode ? 'X' : ' '}] (Weaknesses Hidden)`,
         '',
         `> ENTER to begin your run`,
       ];
       lines.forEach((line, i) => {
         const color = line.startsWith('>') ? '#aaddaa' : '#ccbbee';
-        const txt = this.add.text(width / 2, startY + i * 16, line,
-          { fontSize: '11px', color }
+        const txt = this.add.text(width / 2, startY - 10 + i * 13, line,
+          { fontSize: '8px', color }
         ).setOrigin(0.5);
         this.labels.push(txt);
       });
@@ -186,6 +225,33 @@ export class CharacterCreateScene extends Phaser.Scene {
       vit: base.vit + (mods.vit ?? 0),
       agi: base.agi + (mods.agi ?? 0),
     };
+  }
+
+  private getCosmeticTitle(): string {
+    const modsCount = (this.masochistMode ? 1 : 0) +
+                      (this.ironboundMode ? 1 : 0) +
+                      (this.starvedMode ? 1 : 0) +
+                      (this.huntedMode ? 1 : 0) +
+                      (this.blackoutMode ? 1 : 0) +
+                      (this.glassMode ? 1 : 0) +
+                      (this.wrongfootedMode ? 1 : 0);
+
+    if (modsCount === 7) return 'Dungeon Overlord';
+    if (modsCount === 6) return 'Ascended Deity';
+    if (modsCount === 5) return 'Dungeon Deity';
+    if (modsCount === 4) return 'Dread Conqueror';
+    if (modsCount === 3) return 'Death Seeker';
+    if (modsCount === 2) return 'Daring Adventurer';
+    if (modsCount === 1) {
+      if (this.masochistMode) return 'Masochist';
+      if (this.ironboundMode) return 'Ironbound';
+      if (this.starvedMode) return 'Starved';
+      if (this.huntedMode) return 'Hunted';
+      if (this.blackoutMode) return 'Blackout';
+      if (this.glassMode) return 'Glass Cannon';
+      if (this.wrongfootedMode) return 'Wrongfooted';
+    }
+    return 'Challenger';
   }
 
   private createAndStart(): void {
@@ -230,6 +296,13 @@ export class CharacterCreateScene extends Phaser.Scene {
       unspentSkillPoints: 0,
       unlockedSkills: [],
       masochist: this.masochistMode,
+      ironbound: this.ironboundMode,
+      starved: this.starvedMode,
+      hunted: this.huntedMode,
+      blackout: this.blackoutMode,
+      glass: this.glassMode,
+      wrongfooted: this.wrongfootedMode,
+      title: this.getCosmeticTitle(),
       createdAt: new Date().toISOString(),
     };
 

@@ -1,9 +1,10 @@
 import Phaser from 'phaser';
 import { Player } from '../entities/Player';
 import { SaveManager } from '../systems/SaveManager';
-import { expForLevel } from '../config';
+import { expForLevel, TILE } from '../config';
 import { WeaponFamily } from '../data/movesets';
 import { Ailment, AILMENT_CONFIGS } from '../systems/StatusSystem';
+import { AudioManager } from '../systems/AudioManager';
 
 const BAR_W = 160;
 const BAR_H = 8;
@@ -59,11 +60,44 @@ export class UIScene extends Phaser.Scene {
 
   // §14 Skills HUD slots
   private playerRef: Player | null = null;
-  private skillSlots: { bg: Phaser.GameObjects.Rectangle; label: Phaser.GameObjects.Text; cooldownOverlay: Phaser.GameObjects.Rectangle }[] = [];
+  private skillSlots: { bg: Phaser.GameObjects.Rectangle; label: Phaser.GameObjects.Text; cooldownOverlay: Phaser.GameObjects.Rectangle; pip: Phaser.GameObjects.Arc }[] = [];
 
   // §15 Player ailments HUD indicators
   private ailmentGraphics!: Phaser.GameObjects.Graphics;
   private ailmentTexts: Phaser.GameObjects.Text[] = [];
+  private ailmentTooltip: Phaser.GameObjects.Container | null = null;
+
+  // §19 Boss HP bar
+  private bossSection!: Phaser.GameObjects.Container;
+  private bossName!: Phaser.GameObjects.Text;
+  private bossHpBg!: Phaser.GameObjects.Rectangle;
+  private bossHpBar!: Phaser.GameObjects.Rectangle;
+  private bossHpText!: Phaser.GameObjects.Text;
+  private bossPhaseText!: Phaser.GameObjects.Text;
+  private bossWeaknessText!: Phaser.GameObjects.Text;  // §P11 weakness hint at Research Lv2
+  private bossPips: Phaser.GameObjects.Rectangle[] = [];
+
+  // §20 Anomaly whisper
+  private anomalyWhisper!: Phaser.GameObjects.Text;
+  private anomalyWhisperTween: Phaser.Tweens.Tween | null = null;
+
+  // §22 Companion HUD rows
+  private companionRows: Phaser.GameObjects.Container[] = [];
+
+  // §27 Minimap
+  private minimapContainer!: Phaser.GameObjects.Container;
+  private minimapGraphics!: Phaser.GameObjects.Graphics;
+
+  // §27 Map overlay
+  private mapOverlayContainer!: Phaser.GameObjects.Container;
+  private mapOverlayGraphics!: Phaser.GameObjects.Graphics;
+  private mapKey!: Phaser.Input.Keyboard.Key;
+
+  private settingsButton!: Phaser.GameObjects.Text;
+  private captionText!: Phaser.GameObjects.Text;
+  private captionTween: Phaser.Tweens.Tween | null = null;
+  // §P11 Specialization label
+  private specializationLabel!: Phaser.GameObjects.Text;
 
   constructor() { super({ key: 'UIScene', active: false }); }
 
@@ -134,21 +168,67 @@ export class UIScene extends Phaser.Scene {
     // Hotbar (3 slots at bottom-center)
     this.buildHotbar();
 
-    this.game.events.on('hud-update',     this.onHudUpdate,     this);
-    this.game.events.on('floor-update',   this.onFloorUpdate,   this);
-    this.game.events.on('weapon-switch',  this.onWeaponSwitch,  this);
-    this.game.events.on('hotbar-update',  this.onHotbarUpdate,  this);
-    this.game.events.on('guard-update',   this.onGuardUpdate,   this);
-    this.game.events.on('weapon-gauge',   this.onWeaponGauge,   this);
-    this.game.events.on('ammo-update',    this.onAmmoUpdate,    this);
+    // §19 Boss HP bar — centered at top
+    this.buildBossSection();
+
+    // §27 Minimap
+    this.buildMinimap();
+    this.buildMapOverlay();
+
+    // §20 Anomaly whisper text — bottom center, initially hidden
+    this.anomalyWhisper = this.add.text(0, 0, '', {
+      fontSize: '9px', color: '#cc88ff', align: 'center',
+      stroke: '#000000', strokeThickness: 2,
+    }).setOrigin(0.5, 1).setAlpha(0).setDepth(20);
+
+    // Settings button
+    this.settingsButton = this.add.text(0, 0, '⚙', {
+      fontSize: '14px', color: '#998bbb'
+    }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
+    this.settingsButton.on('pointerdown', () => this.showSettings());
+    this.settingsButton.on('pointerover', () => this.settingsButton.setColor('#ffffff'));
+    this.settingsButton.on('pointerout', () => this.settingsButton.setColor('#998bbb'));
+
+    // Caption text
+    this.captionText = this.add.text(0, 0, '', {
+      fontSize: '10px',
+      color: '#ffffff',
+      align: 'center',
+      backgroundColor: '#00000088',
+      padding: { x: 6, y: 3 }
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(30).setVisible(false);
+
+    // §P11 Specialization label (below weapon text)
+    this.specializationLabel = this.add.text(0, 0, '', {
+      fontSize: '8px', color: '#ffaa33',
+    }).setOrigin(0, 0).setDepth(8).setVisible(false);
+
+    this.game.events.on('hud-update',           this.onHudUpdate,        this);
+    this.game.events.on('floor-update',         this.onFloorUpdate,      this);
+    this.game.events.on('weapon-switch',        this.onWeaponSwitch,     this);
+    this.game.events.on('hotbar-update',        this.onHotbarUpdate,     this);
+    this.game.events.on('guard-update',         this.onGuardUpdate,      this);
+    this.game.events.on('weapon-gauge',         this.onWeaponGauge,      this);
+    this.game.events.on('ammo-update',          this.onAmmoUpdate,       this);
+    this.game.events.on('boss-update',          this.onBossUpdate,       this);
+    this.game.events.on('anomaly-whisper',      this.onAnomalyWhisper,   this);
+    this.game.events.on('companion-hud-update', this.onCompanionUpdate,  this);
+    this.game.events.on('audio-caption',        this.onAudioCaption,     this);
+    this.game.events.on('specialization-update', (d: { name: string }) => {
+      this.specializationLabel.setText(`[${d.name.toUpperCase()}]`).setVisible(true);
+    }, this);
     this.events.once('shutdown', () => {
-      this.game.events.off('hud-update',    this.onHudUpdate,    this);
-      this.game.events.off('floor-update',  this.onFloorUpdate,  this);
-      this.game.events.off('weapon-switch', this.onWeaponSwitch, this);
-      this.game.events.off('hotbar-update', this.onHotbarUpdate, this);
-      this.game.events.off('guard-update',  this.onGuardUpdate,  this);
-      this.game.events.off('weapon-gauge',  this.onWeaponGauge,  this);
-      this.game.events.off('ammo-update',    this.onAmmoUpdate,    this);
+      this.game.events.off('hud-update',           this.onHudUpdate,        this);
+      this.game.events.off('floor-update',         this.onFloorUpdate,      this);
+      this.game.events.off('weapon-switch',        this.onWeaponSwitch,     this);
+      this.game.events.off('hotbar-update',        this.onHotbarUpdate,     this);
+      this.game.events.off('guard-update',         this.onGuardUpdate,      this);
+      this.game.events.off('weapon-gauge',         this.onWeaponGauge,      this);
+      this.game.events.off('ammo-update',          this.onAmmoUpdate,       this);
+      this.game.events.off('boss-update',          this.onBossUpdate,       this);
+      this.game.events.off('anomaly-whisper',      this.onAnomalyWhisper,   this);
+      this.game.events.off('companion-hud-update', this.onCompanionUpdate,  this);
+      this.game.events.off('audio-caption',        this.onAudioCaption,     this);
     });
 
     this.scale.on('resize', this.reposition, this);
@@ -166,6 +246,13 @@ export class UIScene extends Phaser.Scene {
       if (wepId) this.weaponText.setText(`[${save.activeWeaponSlot === 0 ? '1' : '2'}] ${wepId}`);
       this.refreshHotbarFromSave(save.inventory);
       this.updateStatBanner(save);
+      // §P11 — Show active specialization label if present
+      if (save.specialization) {
+        const specName = save.specialization.includes(':')
+          ? save.specialization.split(':')[0]
+          : save.specialization;
+        this.specializationLabel.setText(`[${specName.toUpperCase()}]`).setVisible(true);
+      }
     }
   }
 
@@ -202,8 +289,85 @@ export class UIScene extends Phaser.Scene {
         .setOrigin(0.5)
         .setScrollFactor(0)
         .setDepth(7);
-      this.skillSlots.push({ bg, label, cooldownOverlay });
+      const pip = this.add.circle(0, 0, 3, 0x555555)
+        .setScrollFactor(0)
+        .setDepth(8);
+      this.skillSlots.push({ bg, label, cooldownOverlay, pip });
     }
+  }
+
+  private buildBossSection(): void {
+    const BW = 280, BH = 10, BX = 0, BY = 0;
+    this.bossSection = this.add.container(BX, BY).setDepth(12).setVisible(false);
+
+    this.bossName = this.add.text(0, -2, '', {
+      fontSize: '9px', color: '#ffcc55', stroke: '#330000', strokeThickness: 2,
+    }).setOrigin(0.5, 1);
+
+    this.bossHpBg  = this.add.rectangle(0, 0, BW, BH, 0x330000).setOrigin(0.5, 0);
+    this.bossHpBar = this.add.rectangle(0, 0, BW, BH, 0xcc2222).setOrigin(0.5, 0);
+    this.bossHpText = this.add.text(BW / 2 + 4, 1, '', { fontSize: '7px', color: '#cc4444' }).setOrigin(0, 0);
+    this.bossPhaseText = this.add.text(-BW / 2 - 4, 1, '', { fontSize: '7px', color: '#888888' }).setOrigin(1, 0);
+    // §P11 — Weakness hint (shown at Research Lv2+)
+    this.bossWeaknessText = this.add.text(0, BH + 2, '', { fontSize: '6px', color: '#ffaa33' }).setOrigin(0.5, 0);
+
+    this.bossSection.add([this.bossName, this.bossHpBg, this.bossHpBar, this.bossHpText, this.bossPhaseText, this.bossWeaknessText]);
+  }
+
+  private onBossUpdate(data: {
+    visible: boolean; name: string; hp: number; maxHp: number;
+    phaseIdx: number; phaseCount: number;
+    bossId?: string; phaseElemFamily?: string;
+    parts: { id: string; name: string; broken: boolean }[];
+  }): void {
+    this.bossSection.setVisible(data.visible);
+    if (!data.visible) return;
+
+    const BW = 280;
+    this.bossName.setText(data.name);
+    const ratio = Math.max(0, data.hp / data.maxHp);
+    this.bossHpBar.width = BW * ratio;
+    this.bossHpBar.setFillStyle(ratio > 0.5 ? 0xcc2222 : ratio > 0.25 ? 0xdd6611 : 0xff4444);
+    this.bossHpText.setText(`${data.hp}/${data.maxHp}`);
+    this.bossPhaseText.setText(data.phaseCount > 1 ? `P${data.phaseIdx + 1}/${data.phaseCount}` : '');
+
+    // §P11 — Weakness reveal at Research Lv2+
+    const meta = SaveManager.loadAccountMeta();
+    const save = SaveManager.load();
+    const wrongfooted = save?.wrongfooted ?? false;
+    const resEntry = data.bossId ? meta.research?.find(r => r.enemyId === data.bossId) : null;
+    const resLvl = resEntry?.level ?? 0;
+    if (resLvl >= 2 && data.phaseElemFamily && !wrongfooted) {
+      // Map elem family to its weakness (approximate from common knowledge)
+      const weakMap: Record<string, string> = {
+        fire: '💧 ICE', ice: '⚡ LIGHTNING', lightning: '🌿 RADIANT',
+        void: '✨ RADIANT', beast: '🗡 SLASH', undead: '✨ RADIANT',
+        spirit: '🔮 VOID', construct: '🔨 BLUNT', armored: '🔨 BLUNT',
+      };
+      const weak = weakMap[data.phaseElemFamily];
+      this.bossWeaknessText.setText(weak ? `⚠ WEAK: ${weak}` : '').setVisible(!!weak);
+    } else {
+      this.bossWeaknessText.setText('');
+    }
+
+    // Rebuild part pips
+    this.bossPips.forEach(p => p.destroy());
+    this.bossPips = [];
+    const pipW = 36, pipH = 6, gap = 4;
+    const totalPipW = data.parts.length * pipW + (data.parts.length - 1) * gap;
+    const startX = -totalPipW / 2;
+    data.parts.forEach((part, i) => {
+      const pip = this.add.rectangle(startX + i * (pipW + gap) + pipW / 2, 14, pipW, pipH,
+        part.broken ? 0x444444 : 0xff8800)
+        .setStrokeStyle(1, part.broken ? 0x222222 : 0xffcc00);
+      this.bossPips.push(pip);
+      this.bossSection.add(pip);
+
+      // Part label
+      const lbl = this.add.text(startX + i * (pipW + gap) + pipW / 2, 14, part.name.substring(0, 6),
+        { fontSize: '5px', color: part.broken ? '#444444' : '#ffffff' }).setOrigin(0.5);
+      this.bossSection.add(lbl);
+    });
   }
 
   private reposition(): void {
@@ -215,12 +379,24 @@ export class UIScene extends Phaser.Scene {
     this.weaponText.setPosition(PAD, PAD + 80);
     this.ammoText.setPosition(PAD, PAD + 92);
     this.gaugeRow.setPosition(PAD, PAD + 104);
+    this.specializationLabel.setPosition(PAD, PAD + 67);
+    this.settingsButton.setPosition(w - PAD - 55, PAD - 2);
+    this.captionText.setPosition(w / 2, h - 90);
+
+    // §19 Boss bar — top center, below floor text
+    this.bossSection.setPosition(w / 2, PAD + 26);
 
     // Guard indicator — top-right, under gold
     this.guardIndicator.setPosition(w - PAD, PAD + 18);
 
+    // §27 Minimap positioning — under guard indicator
+    this.minimapContainer.setPosition(w - PAD - 75, PAD + 36);
+
     // Stat banner — top center, below floor text
     this.statBanner.setPosition(w / 2, PAD + 18);
+
+    // §20 Anomaly whisper — just above hint text
+    this.anomalyWhisper.setPosition(w / 2, h - PAD - 18);
 
     // Hotbar: centered, just above hint text
     const SLOT_W = 46, SLOT_H = 30, GAP = 4;
@@ -240,6 +416,7 @@ export class UIScene extends Phaser.Scene {
       slot.bg.setPosition(x, slotY);
       slot.label.setPosition(x, slotY);
       slot.cooldownOverlay.setPosition(x, slotY + 15);
+      slot.pip.setPosition(x + SLOT_W / 2 - 6, slotY - SLOT_H / 2 + 6);
     }
   }
 
@@ -417,6 +594,8 @@ export class UIScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number): void {
+    this.drawMinimap(time);
+    this.drawMapOverlay();
     if (!this.playerRef) return;
 
     const skillKeys = ['R', 'F', 'V'] as const;
@@ -477,6 +656,7 @@ export class UIScene extends Phaser.Scene {
         slot.label.setText(`${slotKey}:--\nLocked`);
         slot.bg.setFillStyle(0x0a070e, 0.92);
         slot.cooldownOverlay.height = 0;
+        slot.pip.setFillStyle(0x555555);
       } else {
         const cdLeft = this.playerRef.skillCooldowns.get(skillId) ?? 0;
         if (cdLeft > 0 && maxCdMs > 0) {
@@ -486,17 +666,18 @@ export class UIScene extends Phaser.Scene {
           const secs = (cdLeft / 1000).toFixed(1);
           slot.label.setText(`${slotKey}:${name}\n${secs}s`);
           slot.bg.setFillStyle(0x2a1515, 0.92);
+          slot.pip.setFillStyle(0xff3333);
         } else {
           slot.cooldownOverlay.height = 0;
-
+          slot.pip.setFillStyle(0x33ff33);
           let suffix = '';
           if (slotKey === 'R') {
-            if (classKey === 'archer') {
+            if (classKey === 'archer' && this.playerRef.activeCoating !== 'none') {
               suffix = `\n(${this.playerRef.activeCoating})`;
             } else if (classKey === 'sage') {
               suffix = `\n(${this.playerRef.activeElement})`;
             } else if (classKey === 'tanker' && this.playerRef.bastionModeActive) {
-              suffix = '\n(Active)';
+              suffix = '\n(Bastion)';
             } else if (classKey === 'assassin' && this.playerRef.stealthActive) {
               suffix = '\n(Stealth)';
             } else if (classKey === 'swordman' && this.playerRef.riposteStanceMs > 0) {
@@ -517,7 +698,20 @@ export class UIScene extends Phaser.Scene {
     let index = 0;
     const startX = PAD;
     const startY = PAD + 60;
-    const SPACING = 20;
+    const SPACING = 28;
+
+    const AILMENT_DESCRIPTIONS: Record<string, string> = {
+      poison: 'Deals 3 flat damage/sec. Ignores 50% defense.',
+      bleed: 'Deals 2 flat damage/sec. Increased to 5 while moving.',
+      burn: 'Deals 4 damage/sec, defense is reduced by 30%. Roll (Z) to extinguish.',
+      chill: 'Reduces movement speed by 30%.',
+      frozen: 'Stunned completely. Mash keys to escape.',
+      shock: 'Deals 15 damage/sec & periodically staggers/interrupts.',
+      stun: 'Stunned. Unable to move or act. Mash keys to recover.',
+      curse: 'Reduces maximum HP by 25%. Cleanse at Chapel.',
+      webbed: 'Rooted in place. Cannot move.',
+      wet: 'Amplifies lightning damage taken by 50%, reduces fire damage by 50%.'
+    };
 
     for (const [id, ms] of this.playerRef.activeAilments.entries()) {
       if (ms <= 0) continue;
@@ -526,16 +720,29 @@ export class UIScene extends Phaser.Scene {
       if (!cfg) continue;
 
       if (!this.ailmentTexts[index]) {
-        this.ailmentTexts[index] = this.add.text(0, 0, '', { fontSize: '10px' }).setScrollFactor(0);
+        this.ailmentTexts[index] = this.add.text(0, 0, '', { fontSize: '7px' }).setScrollFactor(0);
       }
       const txt = this.ailmentTexts[index];
       txt.setPosition(startX + index * SPACING, startY);
-      txt.setText(cfg.icon);
+      
+      const sec = Math.ceil(ms / 1000);
+      const timerStr = ailmentId === 'curse' ? '∞' : `${sec}s`;
+      txt.setText(`${cfg.icon} ${timerStr}`);
       txt.setVisible(true);
+      txt.setInteractive({ useHandCursor: true });
+      txt.off('pointerover');
+      txt.off('pointerout');
+      txt.on('pointerover', (pointer: Phaser.Input.Pointer) => {
+        const desc = AILMENT_DESCRIPTIONS[ailmentId] || '';
+        this.showAilmentTooltip(pointer, cfg.name, cfg.icon, desc);
+      });
+      txt.on('pointerout', () => {
+        this.hideAilmentTooltip();
+      });
 
       const bx = startX + index * SPACING;
       const by = startY + 12;
-      const barW = 12;
+      const barW = 16;
       const barH = 2;
       const ratio = ailmentId === 'curse' ? 1.0 : ms / cfg.durationMs;
 
@@ -547,5 +754,453 @@ export class UIScene extends Phaser.Scene {
 
       index++;
     }
+  }
+
+  // §20 Anomaly whisper
+  private onAnomalyWhisper(text: string): void {
+    if (this.anomalyWhisperTween) {
+      this.anomalyWhisperTween.stop();
+      this.anomalyWhisperTween = null;
+    }
+    this.anomalyWhisper.setText(text).setAlpha(1);
+    this.anomalyWhisperTween = this.tweens.add({
+      targets: this.anomalyWhisper,
+      alpha: 0,
+      delay: 4000,
+      duration: 2000,
+      onComplete: () => { this.anomalyWhisperTween = null; },
+    });
+  }
+
+  // §22 Companion HUD
+  private onCompanionUpdate(companions: import('../types').CompanionSaveData[]): void {
+    for (const row of this.companionRows) row.destroy();
+    this.companionRows = [];
+
+    const sw = this.scale.width;
+    companions.forEach((c, i) => {
+      const x = sw - 10;
+      const y = PAD + 120 + i * 36;
+      const row = this.add.container(x, y).setDepth(8);
+
+      const bg = this.add.rectangle(-65, 0, 120, 30, 0x0a1510, 0.85).setOrigin(0);
+      const nameT = this.add.text(-62, 2, `${c.name}  [${c.command.toUpperCase()}]`, {
+        fontSize: '6px', color: '#aaffaa',
+      }).setOrigin(0);
+
+      // HP bar
+      const hpFrac = Math.max(0, Math.min(1, c.currentHp / c.maxHp));
+      const hpBg = this.add.rectangle(-62, 12, 80, 5, 0x331111).setOrigin(0);
+      const hpBar = this.add.rectangle(-62, 12, Math.round(80 * hpFrac), 5, 0xcc3333).setOrigin(0);
+      const hpT   = this.add.text(-62, 18, `${Math.round(c.currentHp)}/${c.maxHp}  Ftg:${Math.round(c.fatigue)}%`, {
+        fontSize: '5px', color: '#888888',
+      }).setOrigin(0);
+
+      row.add([bg, nameT, hpBg, hpBar, hpT]);
+      this.companionRows.push(row);
+    });
+  }
+
+  private showAilmentTooltip(pointer: Phaser.Input.Pointer, name: string, icon: string, desc: string): void {
+    if (this.ailmentTooltip) this.ailmentTooltip.destroy();
+
+    this.ailmentTooltip = this.add.container(0, 0).setDepth(100).setScrollFactor(0);
+    const title = this.add.text(6, 4, `${icon} ${name}`, { fontSize: '8px', color: '#ff5555', fontStyle: 'bold' });
+    const text = this.add.text(6, 14, desc, { fontSize: '6px', color: '#ccbbee', wordWrap: { width: 120 } });
+
+    const boxW = 132;
+    const boxH = text.height + 20;
+
+    const bg = this.add.rectangle(0, 0, boxW, boxH, 0x05040a, 0.95).setOrigin(0).setStrokeStyle(1, 0x553377);
+    this.ailmentTooltip.add([bg, title, text]);
+
+    this.ailmentTooltip.setPosition(pointer.x + 10, pointer.y + 10);
+  }
+
+  private hideAilmentTooltip(): void {
+    if (this.ailmentTooltip) {
+      this.ailmentTooltip.destroy();
+      this.ailmentTooltip = null;
+    }
+  }
+
+  private buildMinimap(): void {
+    this.minimapContainer = this.add.container(0, 0).setScrollFactor(0).setDepth(15);
+    const bg = this.add.rectangle(0, 0, 75, 75, 0x05040a, 0.95).setOrigin(0).setStrokeStyle(1.5, 0x553377);
+    this.minimapGraphics = this.add.graphics().setDepth(1);
+    this.minimapContainer.add([bg, this.minimapGraphics]);
+  }
+
+  private drawMinimap(time: number): void {
+    if (!this.minimapGraphics) return;
+    this.minimapGraphics.clear();
+
+    const dungeon = this.scene.get('DungeonScene') as any;
+    if (!dungeon || !dungeon.sys.isActive() || !dungeon.player || dungeon.location !== 'dungeon') {
+      this.minimapContainer.setVisible(false);
+      return;
+    }
+    this.minimapContainer.setVisible(true);
+
+    const px = Math.floor(dungeon.player.x / 32);
+    const py = Math.floor(dungeon.player.y / 32);
+    const mapCols = dungeon.mapCols;
+    const mapRows = dungeon.mapRows;
+    const visibility = dungeon.visibility;
+    const tiles = dungeon.tiles;
+
+    if (!tiles || tiles.length === 0 || !visibility) return;
+
+    const GRID_SIZE = 15;
+    const CELL_SIZE = 5;
+    const HALF_GRID = Math.floor(GRID_SIZE / 2);
+
+    for (let dy = -HALF_GRID; dy <= HALF_GRID; dy++) {
+      for (let dx = -HALF_GRID; dx <= HALF_GRID; dx++) {
+        const tx = px + dx;
+        const ty = py + dy;
+
+        if (tx >= 0 && tx < mapCols && ty >= 0 && ty < mapRows) {
+          const vis = visibility[ty * mapCols + tx];
+          if (vis === 2 || vis === 1) { // VIS_VISIBLE (2) or VIS_EXPLORED (1)
+            const tileId = tiles[ty][tx];
+            const isFloor = tileId === 1 || (tileId >= 10 && tileId <= 13);
+            const isWall = !isFloor;
+            const cx = (dx + HALF_GRID) * CELL_SIZE;
+            const cy = (dy + HALF_GRID) * CELL_SIZE;
+
+            if (isWall) {
+              this.minimapGraphics.fillStyle(0x3a2c55, 1);
+            } else {
+              this.minimapGraphics.fillStyle(vis === 2 ? 0x2b1d4a : 0x1e1530, 1);
+            }
+            this.minimapGraphics.fillRect(cx, cy, CELL_SIZE, CELL_SIZE);
+          }
+        }
+      }
+    }
+
+    // Draw other entities on the map
+    // Player - centered
+    const center = HALF_GRID * CELL_SIZE + CELL_SIZE / 2;
+    this.minimapGraphics.fillStyle(0x33ff33, 1);
+    this.minimapGraphics.fillCircle(center, center, 2);
+
+    // Warp Pads
+    if (dungeon.warpPads) {
+      for (const wp of dungeon.warpPads) {
+        const wCol = Math.floor(wp.x / 32);
+        const wRow = Math.floor(wp.y / 32);
+        const dx = wCol - px;
+        const dy = wRow - py;
+        if (Math.abs(dx) <= HALF_GRID && Math.abs(dy) <= HALF_GRID) {
+          if (visibility[wRow * mapCols + wCol] > 0) {
+            const cx = (dx + HALF_GRID) * CELL_SIZE + CELL_SIZE / 2;
+            const cy = (dy + HALF_GRID) * CELL_SIZE + CELL_SIZE / 2;
+            this.minimapGraphics.fillStyle(0x4488ff, 1);
+            this.minimapGraphics.fillCircle(cx, cy, 2);
+          }
+        }
+      }
+    }
+
+    // Campsites
+    if (dungeon.floorData && dungeon.floorData.campPositions) {
+      for (const cp of dungeon.floorData.campPositions) {
+        const dx = cp.col - px;
+        const dy = cp.row - py;
+        if (Math.abs(dx) <= HALF_GRID && Math.abs(dy) <= HALF_GRID) {
+          if (visibility[cp.row * mapCols + cp.col] > 0) {
+            const cx = (dx + HALF_GRID) * CELL_SIZE + CELL_SIZE / 2;
+            const cy = (dy + HALF_GRID) * CELL_SIZE + CELL_SIZE / 2;
+            this.minimapGraphics.fillStyle(0xff8800, 1);
+            this.minimapGraphics.fillCircle(cx, cy, 2);
+          }
+        }
+      }
+    }
+
+    // Anomalies
+    if (dungeon.anomalyProps) {
+      for (const prop of dungeon.anomalyProps) {
+        if (prop.interacted) continue;
+        const dx = prop.col - px;
+        const dy = prop.row - py;
+        if (Math.abs(dx) <= HALF_GRID && Math.abs(dy) <= HALF_GRID) {
+          if (visibility[prop.row * mapCols + prop.col] > 0) {
+            const cx = (dx + HALF_GRID) * CELL_SIZE + CELL_SIZE / 2;
+            const cy = (dy + HALF_GRID) * CELL_SIZE + CELL_SIZE / 2;
+            this.minimapGraphics.fillStyle(0xcc88ff, 1);
+            this.minimapGraphics.fillCircle(cx, cy, 2);
+          }
+        }
+      }
+    }
+  }
+
+  private buildMapOverlay(): void {
+    this.mapKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.M);
+    this.mapOverlayContainer = this.add.container(0, 0).setScrollFactor(0).setDepth(25).setVisible(false);
+
+    // Large backdrop panel for map overlay
+    const sw = this.scale.width;
+    const sh = this.scale.height;
+    const bg = this.add.rectangle(sw / 2, sh / 2, sw * 0.8, sh * 0.8, 0x05040a, 0.95)
+      .setStrokeStyle(1.5, 0x553377);
+    
+    const title = this.add.text(sw / 2, sh / 2 - sh * 0.36, '— FLOOR MAP —', {
+      fontSize: '10px',
+      color: '#aaddff',
+      fontStyle: 'bold'
+    }).setOrigin(0.5);
+
+    this.mapOverlayGraphics = this.add.graphics();
+
+    this.mapOverlayContainer.add([bg, title, this.mapOverlayGraphics]);
+  }
+
+  private drawMapOverlay(): void {
+    if (!this.mapOverlayGraphics) return;
+    this.mapOverlayGraphics.clear();
+
+    const dungeon = this.scene.get('DungeonScene') as any;
+    if (!dungeon || !dungeon.sys.isActive() || !dungeon.player || dungeon.location !== 'dungeon') {
+      this.mapOverlayContainer.setVisible(false);
+      return;
+    }
+
+    // Toggle visibility based on map key hold
+    const isMapKeyDown = this.mapKey && this.mapKey.isDown;
+    this.mapOverlayContainer.setVisible(isMapKeyDown);
+    if (!isMapKeyDown) return;
+
+    const px = Math.floor(dungeon.player.x / 32);
+    const py = Math.floor(dungeon.player.y / 32);
+    const mapCols = dungeon.mapCols;
+    const mapRows = dungeon.mapRows;
+    const visibility = dungeon.visibility;
+    const tiles = dungeon.tiles;
+
+    if (!tiles || tiles.length === 0 || !visibility) return;
+
+    const GRID_SIZE = 61;
+    const CELL_SIZE = 3;
+    const HALF_GRID = Math.floor(GRID_SIZE / 2);
+
+    const sw = this.scale.width;
+    const sh = this.scale.height;
+    
+    // Reposition the overlay elements dynamically
+    const bg = this.mapOverlayContainer.getAt(0) as Phaser.GameObjects.Rectangle;
+    const title = this.mapOverlayContainer.getAt(1) as Phaser.GameObjects.Text;
+
+    bg.setPosition(sw / 2, sh / 2);
+    bg.setSize(sw * 0.8, sh * 0.8);
+    title.setPosition(sw / 2, sh / 2 - sh * 0.36);
+
+    // Calculate the start position to draw inside the overlay container
+    const startX = sw / 2 - (GRID_SIZE * CELL_SIZE) / 2;
+    const startY = sh / 2 - (GRID_SIZE * CELL_SIZE) / 2;
+
+    for (let dy = -HALF_GRID; dy <= HALF_GRID; dy++) {
+      for (let dx = -HALF_GRID; dx <= HALF_GRID; dx++) {
+        const tx = px + dx;
+        const ty = py + dy;
+
+        if (tx >= 0 && tx < mapCols && ty >= 0 && ty < mapRows) {
+          const vis = visibility[ty * mapCols + tx];
+          if (vis === 2 || vis === 1) { // VIS_VISIBLE (2) or VIS_EXPLORED (1)
+            const tileId = tiles[ty][tx];
+            const isFloor = tileId === 1 || (tileId >= 10 && tileId <= 13);
+            const isWall = !isFloor;
+            const cx = startX + (dx + HALF_GRID) * CELL_SIZE;
+            const cy = startY + (dy + HALF_GRID) * CELL_SIZE;
+
+            if (isWall) {
+              this.mapOverlayGraphics.fillStyle(0x3a2c55, 1);
+            } else {
+              this.mapOverlayGraphics.fillStyle(vis === 2 ? 0x2b1d4a : 0x1e1530, 1);
+            }
+            this.mapOverlayGraphics.fillRect(cx, cy, CELL_SIZE, CELL_SIZE);
+          }
+        }
+      }
+    }
+
+    // Draw player in the center of the overlay
+    const centerIdx = HALF_GRID * CELL_SIZE + CELL_SIZE / 2;
+    this.mapOverlayGraphics.fillStyle(0x33ff33, 1);
+    this.mapOverlayGraphics.fillCircle(startX + centerIdx, startY + centerIdx, 3);
+
+    // Draw other landmarks if within the grid bounds and explored
+    // Warp Pads
+    if (dungeon.warpPads) {
+      for (const wp of dungeon.warpPads) {
+        const wCol = Math.floor(wp.x / 32);
+        const wRow = Math.floor(wp.y / 32);
+        const dx = wCol - px;
+        const dy = wRow - py;
+        if (Math.abs(dx) <= HALF_GRID && Math.abs(dy) <= HALF_GRID) {
+          if (visibility[wRow * mapCols + wCol] > 0) {
+            const cx = startX + (dx + HALF_GRID) * CELL_SIZE + CELL_SIZE / 2;
+            const cy = startY + (dy + HALF_GRID) * CELL_SIZE + CELL_SIZE / 2;
+            this.mapOverlayGraphics.fillStyle(0x4488ff, 1);
+            this.mapOverlayGraphics.fillCircle(cx, cy, 3);
+          }
+        }
+      }
+    }
+
+    // Campsites
+    if (dungeon.floorData && dungeon.floorData.campPositions) {
+      for (const cp of dungeon.floorData.campPositions) {
+        const dx = cp.col - px;
+        const dy = cp.row - py;
+        if (Math.abs(dx) <= HALF_GRID && Math.abs(dy) <= HALF_GRID) {
+          if (visibility[cp.row * mapCols + cp.col] > 0) {
+            const cx = startX + (dx + HALF_GRID) * CELL_SIZE + CELL_SIZE / 2;
+            const cy = startY + (dy + HALF_GRID) * CELL_SIZE + CELL_SIZE / 2;
+            this.mapOverlayGraphics.fillStyle(0xff8800, 1);
+            this.mapOverlayGraphics.fillCircle(cx, cy, 3);
+          }
+        }
+      }
+    }
+
+    // Anomalies
+    if (dungeon.anomalyProps) {
+      for (const prop of dungeon.anomalyProps) {
+        if (prop.interacted) continue;
+        const dx = prop.col - px;
+        const dy = prop.row - py;
+        if (Math.abs(dx) <= HALF_GRID && Math.abs(dy) <= HALF_GRID) {
+          if (visibility[prop.row * mapCols + prop.col] > 0) {
+            const cx = startX + (dx + HALF_GRID) * CELL_SIZE + CELL_SIZE / 2;
+            const cy = startY + (dy + HALF_GRID) * CELL_SIZE + CELL_SIZE / 2;
+            this.mapOverlayGraphics.fillStyle(0xcc88ff, 1);
+            this.mapOverlayGraphics.fillCircle(cx, cy, 3);
+          }
+        }
+      }
+    }
+  }
+
+  private onAudioCaption(text: string): void {
+    this.captionText.setText(text).setVisible(true).setAlpha(1);
+    if (this.captionTween) {
+      this.captionTween.stop();
+    }
+    this.captionTween = this.tweens.add({
+      targets: this.captionText,
+      alpha: 0,
+      delay: 1500,
+      duration: 500,
+      onComplete: () => {
+        this.captionText.setVisible(false);
+        this.captionTween = null;
+      }
+    });
+  }
+
+  private showSettings(): void {
+    const { width, height } = this.cameras.main;
+    const bw = width * 0.52;
+    const bh = 154;
+    const cx = width / 2;
+    const cy = height / 2;
+
+    const overlay = this.add.rectangle(0, 0, width, height, 0x000000, 0.82).setOrigin(0).setDepth(100);
+    const box = this.add.rectangle(cx, cy, bw, bh, 0x0e091a).setStrokeStyle(1.5, 0x8866cc).setDepth(101);
+    
+    const title = this.add.text(cx, cy - bh / 2 + 10, '— SETTINGS —', {
+      fontSize: '11px', color: '#aaddff', fontStyle: 'bold'
+    }).setOrigin(0.5).setDepth(102);
+
+    const items: Phaser.GameObjects.Text[] = [];
+
+    const drawSettingsList = () => {
+      items.forEach(t => t.destroy());
+      items.length = 0;
+
+      const yStart = cy - bh / 2 + 28;
+      const lineH = 16;
+
+      // Master Volume
+      const masterStr = `Master Volume: [ ${Math.round(AudioManager.masterVol * 100)}% ]`;
+      const masterT = this.add.text(cx, yStart, masterStr, { fontSize: '8px', color: '#ccbbee' })
+        .setOrigin(0.5).setDepth(102).setInteractive({ useHandCursor: true });
+      masterT.on('pointerdown', () => {
+        AudioManager.masterVol = (AudioManager.masterVol + 0.25) > 1.01 ? 0 : AudioManager.masterVol + 0.25;
+        AudioManager.applyVolumes();
+        AudioManager.saveSettings();
+        drawSettingsList();
+      });
+
+      // Music Volume
+      const musicStr = `Music Volume:  [ ${Math.round(AudioManager.musicVol * 100)}% ]`;
+      const musicT = this.add.text(cx, yStart + lineH, musicStr, { fontSize: '8px', color: '#ccbbee' })
+        .setOrigin(0.5).setDepth(102).setInteractive({ useHandCursor: true });
+      musicT.on('pointerdown', () => {
+        AudioManager.musicVol = (AudioManager.musicVol + 0.25) > 1.01 ? 0 : AudioManager.musicVol + 0.25;
+        AudioManager.applyVolumes();
+        AudioManager.saveSettings();
+        drawSettingsList();
+      });
+
+      // SFX Volume
+      const sfxStr = `SFX Volume:    [ ${Math.round(AudioManager.sfxVol * 100)}% ]`;
+      const sfxT = this.add.text(cx, yStart + 2 * lineH, sfxStr, { fontSize: '8px', color: '#ccbbee' })
+        .setOrigin(0.5).setDepth(102).setInteractive({ useHandCursor: true });
+      sfxT.on('pointerdown', () => {
+        AudioManager.sfxVol = (AudioManager.sfxVol + 0.25) > 1.01 ? 0 : AudioManager.sfxVol + 0.25;
+        AudioManager.applyVolumes();
+        AudioManager.saveSettings();
+        AudioManager.playSFX('hit');
+        drawSettingsList();
+      });
+
+      // Mute Toggle
+      const muteStr = `Mute Audio:    [ ${AudioManager.isMuted ? 'MUTED' : 'ACTIVE'} ]`;
+      const muteT = this.add.text(cx, yStart + 3 * lineH, muteStr, { fontSize: '8px', color: AudioManager.isMuted ? '#ff5555' : '#55ff55' })
+        .setOrigin(0.5).setDepth(102).setInteractive({ useHandCursor: true });
+      muteT.on('pointerdown', () => {
+        AudioManager.isMuted = !AudioManager.isMuted;
+        AudioManager.applyVolumes();
+        AudioManager.saveSettings();
+        drawSettingsList();
+      });
+
+      // Closed Captions Toggle
+      const ccStr = `Visual Captions: [ ${AudioManager.closedCaptions ? 'ON' : 'OFF'} ]`;
+      const ccT = this.add.text(cx, yStart + 4 * lineH, ccStr, { fontSize: '8px', color: '#ccbbee' })
+        .setOrigin(0.5).setDepth(102).setInteractive({ useHandCursor: true });
+      ccT.on('pointerdown', () => {
+        AudioManager.closedCaptions = !AudioManager.closedCaptions;
+        AudioManager.saveSettings();
+        drawSettingsList();
+      });
+
+      // Audio Cues Only Toggle
+      const cuesStr = `Audio Cues Only: [ ${AudioManager.audioCuesOnly ? 'ON' : 'OFF'} ]`;
+      const cuesT = this.add.text(cx, yStart + 5 * lineH, cuesStr, { fontSize: '8px', color: '#ccbbee' })
+        .setOrigin(0.5).setDepth(102).setInteractive({ useHandCursor: true });
+      cuesT.on('pointerdown', () => {
+        AudioManager.audioCuesOnly = !AudioManager.audioCuesOnly;
+        AudioManager.saveSettings();
+        drawSettingsList();
+      });
+
+      // Back Button
+      const back = this.add.text(cx, cy + bh / 2 - 14, '← BACK', {
+        fontSize: '9px', color: '#888888', backgroundColor: '#181224', padding: { x: 8, y: 3 }
+      }).setOrigin(0.5).setDepth(102).setInteractive({ useHandCursor: true });
+      back.on('pointerdown', () => {
+        [overlay, box, title, back, ...items].forEach(o => o.destroy());
+      });
+
+      items.push(masterT, musicT, sfxT, muteT, ccT, cuesT, back);
+    };
+
+    drawSettingsList();
   }
 }

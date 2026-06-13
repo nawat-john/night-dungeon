@@ -2,6 +2,13 @@ import Phaser from 'phaser';
 import { TILE, MAP_COLS, MAP_ROWS, INTERACT_RANGE, calcZoom } from '../config';
 import { Player } from '../entities/Player';
 import { SaveManager } from '../systems/SaveManager';
+import { COMPANION_DEFS } from '../data/companions';
+import { ITEMS } from '../data/items';
+import { addToInventory } from '../lib/inventory';
+import { getDailyBounties, BOUNTY_POOL, BountyTemplate } from '../data/bounties';
+import { AudioManager } from '../systems/AudioManager';
+import { ENEMY_DEFS } from '../data/enemies';
+import { ResearchSystem } from '../systems/ResearchSystem';
 
 // ── Tile palette ───────────────────────────────────────────────────────────────
 const G = 3;  // ground / dead earth
@@ -22,6 +29,8 @@ export class TownScene extends Phaser.Scene {
   private player!: Player;
   private interactables: Interactable[] = [];
   private decorGroup!: Phaser.Physics.Arcade.StaticGroup;
+  private footstepTimer = 0;
+  private bestiaryPage = 0;
 
   constructor() { super('TownScene'); }
 
@@ -30,6 +39,8 @@ export class TownScene extends Phaser.Scene {
     if (!save) { this.scene.start('MainMenuScene'); return; }
     save.location = 'town';
     SaveManager.write(save);
+
+    AudioManager.playMusic('town');
 
     this.cameras.main.fadeIn(300, 0, 0, 0);
 
@@ -75,6 +86,19 @@ export class TownScene extends Phaser.Scene {
 
   update(_time: number, delta: number): void {
     this.player.update(_time, delta);
+
+    // Footstep sounds
+    const body = this.player.body as Phaser.Physics.Arcade.Body;
+    if (body && (body.velocity.x !== 0 || body.velocity.y !== 0)) {
+      this.footstepTimer -= delta;
+      if (this.footstepTimer <= 0) {
+        AudioManager.playSFX('footstep');
+        this.footstepTimer = 350;
+      }
+    } else {
+      this.footstepTimer = 0;
+    }
+
     const px = this.player.x, py = this.player.y;
     const eJust = Phaser.Input.Keyboard.JustDown(this.player.interactKey);
 
@@ -116,29 +140,567 @@ export class TownScene extends Phaser.Scene {
     this.interactables.push({ col: 6,  row: 44, label: 'Enter Chapel',        onInteract: () => goScene('ChapelScene')      });
     this.interactables.push({ col: 56, row: 29, label: "Enter Sage's Tower",  onInteract: () => goScene('SagesTowerScene') });
 
-    // Dungeon gate
+    // Adventurer's Guild — companion hire + bounty board
+    this.interactables.push({
+      col: 56, row: 44, label: "Adventurer's Guild",
+      onInteract: () => this.openGuildPanel(),
+    });
+
+    // Dungeon gate — with optional checkpoint floor
     this.interactables.push({
       col: 31, row: 41, label: 'Enter Dungeon',
-      onInteract: () => {
-        const s = SaveManager.load()!;
-        s.location     = 'dungeon';
-        s.dungeonFloor = 1;
-        s.floorSeed    = Math.floor(Math.random() * 0x7fffffff);
-        s.lastWarpIndex = 0;
-        s.currentHp    = this.player.currentHp;
-        s.currentMp    = this.player.currentMp;
-        s.gold         = this.player.gold;
-        SaveManager.write(s);
-        this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-          this.scene.stop('UIScene');
-          this.scene.start('FloorTransitionScene', { floor: 1 });
-        });
-        this.cameras.main.fadeOut(400, 0, 0, 0);
-      },
+      onInteract: () => this.openGatePanel(),
+    });
+
+    // §25 Ancient Monolith lore monolith
+    this.interactables.push({
+      col: 30, row: 25, label: 'Read Monolith',
+      onInteract: () => this.showMonolithLore(),
+    });
+
+    // Wandering Stall — daily-rotating rare vendor in the market lane
+    this.interactables.push({
+      col: 42, row: 27, label: 'Wandering Stall',
+      onInteract: () => this.openWanderingStall(),
+    });
+
+    // Guard banter — left guard post
+    this.interactables.push({
+      col: 25, row: 37, label: 'Talk to Guard',
+      onInteract: () => this.showGuardBanter(),
     });
   }
 
+  // ── Dungeon Gate panel (with checkpoint option) ──────────────────────────────
+  private openGatePanel(): void {
+    const meta = SaveManager.loadAccountMeta();
+    const checkpoints = meta.unlockedCheckpointFloors.filter(f => f > 1);
+
+    if (checkpoints.length === 0) {
+      // No checkpoints — go straight in at floor 1
+      this.descend(1);
+      return;
+    }
+
+    // Show floor selection panel
+    const sw = this.scale.width, sh = this.scale.height;
+    if (this.children.getByName('gate_panel')) return;
+    const c = this.add.container(sw / 2, sh / 2).setDepth(30).setName('gate_panel').setScrollFactor(0);
+    const pw = 280, ph = 200 + checkpoints.length * 22;
+    c.add(this.add.rectangle(0, 0, pw, ph, 0x08050f, 0.97).setStrokeStyle(1.5, 0x663377));
+    c.add(this.add.text(0, -ph / 2 + 14, 'DUNGEON GATE', { fontSize: '10px', color: '#cc88ff' }).setOrigin(0.5));
+    c.add(this.add.text(0, -ph / 2 + 30, 'Choose entry floor:', { fontSize: '8px', color: '#777799' }).setOrigin(0.5));
+
+    const close = () => c.destroy();
+    c.add(this.add.text(pw / 2 - 10, -ph / 2 + 10, '✕', { fontSize: '10px', color: '#ff6666' }).setOrigin(0.5).setInteractive({ useHandCursor: true }).on('pointerdown', close));
+
+    const allFloors = [1, ...checkpoints];
+    allFloors.forEach((floor, i) => {
+      const y = -ph / 2 + 60 + i * 26;
+      const label = floor === 1 ? 'Floor 1 — The Entrance' : `Floor ${floor} — Unlocked checkpoint`;
+      const btn = this.add.text(0, y, label, {
+        fontSize: '9px', color: '#ddccff',
+        backgroundColor: '#1a0a2a', padding: { x: 10, y: 4 },
+      }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+      btn.on('pointerdown', () => { close(); this.descend(floor); });
+      c.add(btn);
+    });
+
+    c.add(this.add.text(0, ph / 2 - 12, '[ESC] to close', { fontSize: '6px', color: '#443344' }).setOrigin(0.5));
+
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { close(); window.removeEventListener('keydown', handler); }
+    };
+    window.addEventListener('keydown', handler);
+    c.once('destroy', () => window.removeEventListener('keydown', handler));
+  }
+
+  private descend(floor: number): void {
+    const s = SaveManager.load()!;
+    s.location      = 'dungeon';
+    s.dungeonFloor  = floor;
+    s.floorSeed     = Math.floor(Math.random() * 0x7fffffff);
+    s.lastWarpIndex = 0;
+    s.currentHp     = this.player.currentHp;
+    s.currentMp     = this.player.currentMp;
+    s.gold          = this.player.gold;
+    // Reset per-run tracking
+    s.bossesSlain   = [];
+    s.enemiesKilled = 0;
+    s.enemyKillMap  = {};
+    SaveManager.write(s);
+    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+      this.scene.stop('UIScene');
+      this.scene.start('FloorTransitionScene', { floor });
+    });
+    this.cameras.main.fadeOut(400, 0, 0, 0);
+  }
+
+  // ── Wandering Stall (daily-rotating rare vendor) ──────────────────────────────
+  private openWanderingStall(): void {
+    const sw = this.scale.width, sh = this.scale.height;
+    if (this.children.getByName('stall_panel')) return;
+
+    // Daily stock: seeded by date, 3 items from a pool
+    const STALL_POOL = [
+      { id: 'camp_kit',      price: 60  },
+      { id: 'warp_crystal',  price: 150 },
+      { id: 'mana_stone_2',  price: 90  },
+      { id: 'mana_stone_3',  price: 200 },
+      { id: 'dragon_scale',  price: 130 },
+      { id: 'smoke_bomb',    price: 25  },
+      { id: 'spike_trap',    price: 40  },
+      { id: 'whetstone',     price: 20  },
+      { id: 'health_potion', price: 30  },
+      { id: 'mana_potion',   price: 35  },
+      { id: 'frost_crystal', price: 180 },
+      { id: 'brand_ember',   price: 160 },
+    ];
+    const d = new Date();
+    const seed = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate() + 7919;
+    let s = seed >>> 0;
+    const pool = [...STALL_POOL];
+    for (let i = pool.length - 1; i > 0; i--) {
+      s = ((Math.imul(s, 1664525) + 1013904223) >>> 0);
+      const j = s % (i + 1);
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    const stock = pool.slice(0, 3);
+
+    const c = this.add.container(sw / 2, sh / 2).setDepth(30).setName('stall_panel').setScrollFactor(0);
+    const pw = 260, ph = 220;
+    c.add(this.add.rectangle(0, 0, pw, ph, 0x0a0c0a, 0.97).setStrokeStyle(1.5, 0x446644));
+    c.add(this.add.text(0, -ph / 2 + 14, '🛒 WANDERING STALL', { fontSize: '9px', color: '#88cc88' }).setOrigin(0.5));
+    c.add(this.add.text(0, -ph / 2 + 28, 'Rare wares — today only', { fontSize: '7px', color: '#557755' }).setOrigin(0.5));
+
+    const close = () => c.destroy();
+    c.add(this.add.text(pw / 2 - 10, -ph / 2 + 10, '✕', { fontSize: '10px', color: '#ff6666' }).setOrigin(0.5).setInteractive({ useHandCursor: true }).on('pointerdown', close));
+
+    stock.forEach((entry, i) => {
+      const itemDef = ITEMS[entry.id];
+      if (!itemDef) return;
+      const y = -ph / 2 + 65 + i * 46;
+      const canAfford = this.player.gold >= entry.price;
+      c.add(this.add.text(-pw / 2 + 16, y - 6, itemDef.name, { fontSize: '9px', color: canAfford ? '#ddffdd' : '#666666' }));
+      c.add(this.add.text(-pw / 2 + 16, y + 8, `${entry.price}g`, { fontSize: '8px', color: canAfford ? '#ffdd44' : '#554444' }));
+      if (canAfford) {
+        const btn = this.add.text(pw / 2 - 16, y, 'BUY', {
+          fontSize: '8px', color: '#88ffaa',
+          backgroundColor: '#0a2a0a', padding: { x: 6, y: 3 },
+        }).setOrigin(1, 0.5).setInteractive({ useHandCursor: true });
+        btn.on('pointerdown', () => {
+          const save = SaveManager.load();
+          if (!save || save.gold < entry.price) return;
+          this.player.addGold(-entry.price);
+          save.gold = this.player.gold;
+          addToInventory(save.inventory, entry.id, 1);
+          SaveManager.write(save);
+          this.game.events.emit('hud-update', this.player);
+          AudioManager.playSFX('bounce');
+          close();
+          this.openWanderingStall();
+        });
+        c.add(btn);
+      }
+      c.add(this.add.rectangle(0, y + 20, pw - 20, 1, 0x334433, 0.5));
+    });
+
+    c.add(this.add.text(0, ph / 2 - 12, '[ESC] to close', { fontSize: '6px', color: '#334433' }).setOrigin(0.5));
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { close(); window.removeEventListener('keydown', handler); }
+    };
+    window.addEventListener('keydown', handler);
+    c.once('destroy', () => window.removeEventListener('keydown', handler));
+  }
+
+  // ── Guard banter ─────────────────────────────────────────────────────────────
+  private showGuardBanter(): void {
+    const save = SaveManager.load();
+    if (!save) return;
+    const meta = SaveManager.loadAccountMeta();
+    const maxFloor = Math.max(0, ...meta.runHistory.map(r => r.floorReached), 0);
+    const bosses = meta.runHistory.flatMap(r => r.bossesSlain).length;
+
+    const lines = maxFloor >= 9
+      ? ['"You\'ve made it to the deepest floors."', '"Few return from where you\'ve been."', '"I don\'t know whether to salute or run."']
+      : maxFloor >= 5
+      ? ['"Still breathing, adventurer? Impressive."', '"The Forgefather is no joke. Respect."', '"Watch the fire on those lower floors."']
+      : maxFloor >= 2
+      ? ['"Back from the dungeon in one piece?"', '"Don\'t get too comfortable up here."', '"Floor two\'s got surprises. Be careful."']
+      : ['"Turn back if you value your life."', '"Only fools and legends go down there."', '"The last dozen who entered didn\'t return."'];
+
+    if (bosses > 0) lines.push(`"${bosses} boss${bosses > 1 ? 'es' : ''} slain across all your runs. Not bad."`);
+
+    const sw = this.scale.width, sh = this.scale.height;
+    if (this.children.getByName('banter_panel')) return;
+    const c = this.add.container(sw / 2, sh * 0.65).setDepth(30).setName('banter_panel').setScrollFactor(0);
+    const pw = 280, ph = 80 + lines.length * 18;
+    c.add(this.add.rectangle(0, 0, pw, ph, 0x080808, 0.95).setStrokeStyle(1, 0x554422));
+    c.add(this.add.text(0, -ph / 2 + 12, 'GATE GUARD', { fontSize: '8px', color: '#aa8844' }).setOrigin(0.5));
+    lines.forEach((line, i) => {
+      c.add(this.add.text(0, -ph / 2 + 32 + i * 18, line, { fontSize: '7px', color: '#ccbbaa', wordWrap: { width: pw - 20 }, align: 'center' }).setOrigin(0.5));
+    });
+    c.add(this.add.text(0, ph / 2 - 12, '[E or ESC] to dismiss', { fontSize: '6px', color: '#443322' }).setOrigin(0.5));
+
+    const close = () => c.destroy();
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' || e.key === 'e' || e.key === 'E') { close(); window.removeEventListener('keydown', handler); }
+    };
+    this.time.delayedCall(200, () => window.addEventListener('keydown', handler));
+    c.once('destroy', () => window.removeEventListener('keydown', handler));
+  }
+
   // ── Decorations — sparse dark fantasy ────────────────────────────────────────
+  // ── Adventurer's Guild panel ──────────────────────────────────────────────────
+  private openGuildPanel(tab: 'companions' | 'bounties' | 'graveyard' | 'bestiary' | 'investigation' = 'companions'): void {
+    const sw = this.scale.width, sh = this.scale.height;
+    const save = SaveManager.load();
+    if (!save) return;
+
+    if (this.children.getByName('guild_panel')) {
+      this.children.getByName('guild_panel')?.destroy();
+    }
+
+    const pw = 330, ph = 280;
+    const container = this.add.container(sw / 2, sh / 2).setDepth(30).setName('guild_panel').setScrollFactor(0);
+    container.add(this.add.rectangle(0, 0, pw, ph, 0x0a0c14, 0.97).setStrokeStyle(1.5, 0x886622));
+    container.add(this.add.text(0, -ph / 2 + 12, "ADVENTURER'S GUILD", { fontSize: '10px', color: '#ffcc44' }).setOrigin(0.5));
+
+    const close = () => container.destroy();
+    container.add(this.add.text(pw / 2 - 10, -ph / 2 + 10, '✕', { fontSize: '10px', color: '#ff6666' }).setOrigin(0.5).setInteractive({ useHandCursor: true }).on('pointerdown', close));
+
+    // Tab headers
+    const TABS: { id: 'companions' | 'bounties' | 'graveyard' | 'bestiary' | 'investigation'; label: string }[] = [
+      { id: 'companions', label: 'COMPANIONS' },
+      { id: 'bounties',   label: 'BOUNTIES'   },
+      { id: 'graveyard',  label: 'GRAVEYARD'  },
+      { id: 'bestiary',   label: 'BESTIARY'   },
+      { id: 'investigation', label: 'CLUES'   },
+    ];
+    TABS.forEach((t, i) => {
+      const tx = -132 + i * 66;
+      const active = t.id === tab;
+      const tabBg = this.add.rectangle(tx, -ph / 2 + 30, 60, 16, active ? 0x332200 : 0x111111).setStrokeStyle(1, active ? 0x886622 : 0x333333).setInteractive({ useHandCursor: true });
+      tabBg.on('pointerdown', () => { close(); this.openGuildPanel(t.id); });
+      const tabLabel = this.add.text(tx, -ph / 2 + 30, t.label, { fontSize: '6px', color: active ? '#ffcc44' : '#666644' }).setOrigin(0.5);
+      container.add([tabBg, tabLabel]);
+    });
+
+    const contentY = -ph / 2 + 46;
+
+    if (tab === 'companions') {
+      this.buildGuildCompanions(container, save, contentY, pw, close);
+    } else if (tab === 'bounties') {
+      this.buildGuildBounties(container, save, contentY, pw, ph, close);
+    } else if (tab === 'bestiary') {
+      this.buildGuildBestiary(container, contentY, pw, ph);
+    } else if (tab === 'investigation') {
+      this.buildGuildInvestigation(container, contentY, pw, ph);
+    } else {
+      this.buildGuildGraveyard(container, contentY, pw, ph);
+    }
+
+    container.add(this.add.text(0, ph / 2 - 12, '[ESC] to close', { fontSize: '6px', color: '#443322' }).setOrigin(0.5));
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { close(); window.removeEventListener('keydown', handler); }
+    };
+    window.addEventListener('keydown', handler);
+    container.once('destroy', () => window.removeEventListener('keydown', handler));
+  }
+
+  private buildGuildCompanions(container: Phaser.GameObjects.Container, save: ReturnType<typeof SaveManager.load>, contentY: number, _pw: number, close: () => void): void {
+    if (!save) return;
+    container.add(this.add.text(0, contentY + 6, 'Hire a Companion for your next run:', { fontSize: '7px', color: '#aaaaaa' }).setOrigin(0.5));
+
+    const active = save.companions ?? [];
+    COMPANION_DEFS.forEach((def, i) => {
+      const already = active.some(c => c.id === def.id);
+      const canAfford = this.player.gold >= def.hireCost;
+      const canHire   = !already && canAfford && active.length < 2;
+      const col = i % 3, x = -90 + col * 90;
+      const y   = contentY + 64;
+      const bg = this.add.rectangle(x, y, 80, 96, already ? 0x112233 : (canHire ? 0x1a1a0a : 0x0d0d0d)).setStrokeStyle(1, already ? 0x4477aa : (canHire ? 0x886622 : 0x333333));
+      const nameT  = this.add.text(x, y - 36, def.name, { fontSize: '6px', color: canHire ? '#ffcc44' : '#776644', align: 'center', wordWrap: { width: 72 } }).setOrigin(0.5);
+      const roleT  = this.add.text(x, y - 20, def.role.toUpperCase(), { fontSize: '5px', color: '#887755' }).setOrigin(0.5);
+      const statsT = this.add.text(x, y - 10, `HP:${def.hp}  DMG:${def.dmg}`, { fontSize: '5px', color: '#666666' }).setOrigin(0.5);
+      const costT  = this.add.text(x, y + 14, already ? 'HIRED' : `${def.hireCost}g`, { fontSize: '7px', color: already ? '#44aaff' : (canHire ? '#ffdd44' : '#663333') }).setOrigin(0.5);
+      if (canHire) {
+        bg.setInteractive({ useHandCursor: true });
+        bg.on('pointerdown', () => {
+          const s = SaveManager.load();
+          if (!s || s.gold < def.hireCost) return;
+          s.gold -= def.hireCost;
+          this.player.addGold(-def.hireCost);
+          if (!s.companions) s.companions = [];
+          s.companions.push({ id: def.id, name: def.name, role: def.role, currentHp: def.hp, maxHp: def.hp, potions: 3, fatigue: 0, affinity: 0, command: 'follow' });
+          SaveManager.write(s);
+          this.game.events.emit('hud-update', this.player);
+          close();
+          this.openGuildPanel('companions');
+        });
+      }
+      container.add([bg, nameT, roleT, statsT, costT]);
+    });
+
+    if (active.length > 0) {
+      container.add(this.add.text(0, contentY + 140, 'Active companions:', { fontSize: '6.5px', color: '#888888' }).setOrigin(0.5));
+      active.forEach((comp, i) => {
+        const dismissBtn = this.add.text(0, contentY + 154 + i * 18, `${comp.name} — [Dismiss]`, {
+          fontSize: '6.5px', color: '#ff8888', backgroundColor: '#1a0000', padding: { x: 6, y: 2 },
+        }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+        dismissBtn.on('pointerdown', () => {
+          const s = SaveManager.load();
+          if (!s) return;
+          s.companions = (s.companions ?? []).filter(x => x.id !== comp.id);
+          SaveManager.write(s);
+          close();
+          this.openGuildPanel('companions');
+        });
+        container.add(dismissBtn);
+      });
+    }
+  }
+
+  private buildGuildBounties(container: Phaser.GameObjects.Container, save: ReturnType<typeof SaveManager.load>, contentY: number, pw: number, ph: number, close: () => void): void {
+    if (!save) return;
+    const meta = SaveManager.loadAccountMeta();
+    const maxFloor = Math.max(0, ...meta.runHistory.map(r => r.floorReached), 0);
+    const daily = getDailyBounties(maxFloor);
+
+    // Ensure activeBounties is initialized for this set of dailies
+    if (!save.activeBounties) save.activeBounties = [];
+    for (const tpl of daily) {
+      if (!save.activeBounties.some(b => b.id === tpl.id)) {
+        save.activeBounties.push({ id: tpl.id, progress: 0, completed: false });
+      }
+    }
+
+    container.add(this.add.text(0, contentY + 6, 'Daily Bounties  (resets each day)', { fontSize: '7px', color: '#aa9944' }).setOrigin(0.5));
+
+    daily.forEach((tpl, i) => {
+      const bounty = save.activeBounties!.find(b => b.id === tpl.id)!;
+      const y = contentY + 30 + i * 52;
+      const completed = bounty.completed;
+      const progress  = Math.min(bounty.progress, tpl.count);
+      const color     = completed ? '#44ff88' : '#ccccaa';
+
+      container.add(this.add.text(-pw / 2 + 14, y, tpl.description, { fontSize: '8px', color }).setDepth(1));
+      container.add(this.add.text(-pw / 2 + 14, y + 13, `Progress: ${progress}/${tpl.count}`, { fontSize: '7px', color: '#888866' }));
+      const rewardStr = `${tpl.reward.gold}g${tpl.reward.mat ? ` + ${tpl.reward.matQty ?? 1}x ${ITEMS[tpl.reward.mat]?.name ?? tpl.reward.mat}` : ''}`;
+      container.add(this.add.text(-pw / 2 + 14, y + 26, `Reward: ${rewardStr}`, { fontSize: '7px', color: '#aa8833' }));
+
+      if (completed) {
+        // Claim button — only if not yet claimed
+        const claimedKey = `${tpl.id}_claimed_${new Date().toDateString()}`;
+        const alreadyClaimed = !!save.enemyKillMap?.[claimedKey]; // reuse as a flag store
+        if (!alreadyClaimed) {
+          const claimBtn = this.add.text(pw / 2 - 14, y + 13, 'CLAIM', {
+            fontSize: '8px', color: '#ffee44', backgroundColor: '#2a1a00', padding: { x: 6, y: 3 },
+          }).setOrigin(1, 0.5).setInteractive({ useHandCursor: true });
+          claimBtn.on('pointerdown', () => {
+            const s = SaveManager.load();
+            if (!s) return;
+            this.player.addGold(tpl.reward.gold);
+            s.gold = this.player.gold;
+            if (tpl.reward.mat) addToInventory(s.inventory, tpl.reward.mat, tpl.reward.matQty ?? 1);
+            if (!s.enemyKillMap) s.enemyKillMap = {};
+            s.enemyKillMap[claimedKey] = 1;
+            SaveManager.write(s);
+            this.game.events.emit('hud-update', this.player);
+            close();
+            this.openGuildPanel('bounties');
+          });
+          container.add(claimBtn);
+        } else {
+          container.add(this.add.text(pw / 2 - 14, y + 13, '✓ CLAIMED', { fontSize: '7px', color: '#336633' }).setOrigin(1, 0.5));
+        }
+      } else {
+        container.add(this.add.text(pw / 2 - 14, y + 13, 'In progress', { fontSize: '7px', color: '#555544' }).setOrigin(1, 0.5));
+      }
+
+      if (i < daily.length - 1) {
+        container.add(this.add.rectangle(0, y + 40, pw - 20, 1, 0x332200, 0.5));
+      }
+    });
+
+    // Save the initialized bounties
+    SaveManager.write(save);
+  }
+
+  private buildGuildGraveyard(container: Phaser.GameObjects.Container, contentY: number, pw: number, ph: number): void {
+    const meta = SaveManager.loadAccountMeta();
+    const history = [...meta.runHistory].reverse().slice(0, 6);
+    const champions = meta.hallOfChampions;
+
+    if (champions.length > 0) {
+      container.add(this.add.text(0, contentY + 6, '🏆 HALL OF CHAMPIONS', { fontSize: '8px', color: '#ffd700' }).setOrigin(0.5));
+      champions.slice(0, 2).forEach((r, i) => {
+        const titleStr = r.title ? `[${r.title}] ` : '';
+        container.add(this.add.text(0, contentY + 22 + i * 14,
+          `Run #${r.runNumber}  ${titleStr}${r.name}  Floor ${r.floorReached}  ${r.goldEarned}g`,
+          { fontSize: '7px', color: '#ccaa33' }).setOrigin(0.5));
+      });
+      container.add(this.add.rectangle(0, contentY + 50 + Math.min(2, champions.length) * 14, pw - 20, 1, 0x554400, 0.6));
+    }
+
+    const gravY = champions.length > 0 ? contentY + 60 + Math.min(2, champions.length) * 14 : contentY + 6;
+    container.add(this.add.text(0, gravY, '⚰ FALLEN ADVENTURERS', { fontSize: '8px', color: '#886666' }).setOrigin(0.5));
+
+    if (history.length === 0) {
+      container.add(this.add.text(0, gravY + 18, 'No fallen heroes yet.', { fontSize: '8px', color: '#555555' }).setOrigin(0.5));
+    } else {
+      history.forEach((r, i) => {
+        const mins = Math.floor(r.survivedMs / 60000);
+        const y = gravY + 18 + i * 30;
+        const titleStr = r.title ? `[${r.title}] ` : '';
+        container.add(this.add.text(-pw / 2 + 14, y, `#${r.runNumber} ${titleStr}${r.name}  (${r.race}/${r.clazz})`, { fontSize: '7px', color: '#aa8888' }));
+        container.add(this.add.text(-pw / 2 + 14, y + 12, `${r.causeOfDeath}  •  ${mins}m  •  ${r.goldEarned}g`, { fontSize: '6px', color: '#666655' }));
+      });
+    }
+
+    if (meta.runHistory.length === 0 && meta.hallOfChampions.length === 0) {
+      container.add(this.add.text(0, contentY + ph / 2 - 60, 'Enter the dungeon to write your legend.', { fontSize: '7px', color: '#444444' }).setOrigin(0.5));
+    }
+  }
+
+  // ── Bestiary tab ──────────────────────────────────────────────────────────────
+  private buildGuildBestiary(
+    container: Phaser.GameObjects.Container,
+    contentY: number,
+    pw: number,
+    ph: number,
+  ): void {
+    const meta = SaveManager.loadAccountMeta();
+    // Only show enemies the player has at least encountered (kills > 0)
+    const researched = ENEMY_DEFS
+      .map(def => ({ def, entry: ResearchSystem.getEntry(meta, def.id) }))
+      .filter(({ entry }) => entry.kills > 0)
+      .sort((a, b) => b.entry.level - a.entry.level || b.entry.kills - a.entry.kills);
+
+    if (researched.length === 0) {
+      container.add(this.add.text(0, contentY + 40, 'No entries yet — venture into the dungeon.', {
+        fontSize: '7px', color: '#555555',
+      }).setOrigin(0.5));
+      return;
+    }
+
+    container.add(this.add.text(0, contentY + 6, `BESTIARY  (${researched.length} entries)`, {
+      fontSize: '8px', color: '#aaffdd',
+    }).setOrigin(0.5));
+
+    const visibleCount = 5;
+    const page = this.bestiaryPage;
+    const maxPage = Math.max(0, Math.ceil(researched.length / visibleCount) - 1);
+    const pageResearched = researched.slice(page * visibleCount, page * visibleCount + visibleCount);
+
+    const lvColor = ['#888888', '#aaaaff', '#55ffcc', '#ffd700'];
+    const bodyY = contentY + 20;
+    pageResearched.forEach(({ def, entry }, i) => {
+      const y = bodyY + i * 40;
+      const info = ResearchSystem.getBestiaryInfo(def, entry.level);
+      const lv = entry.level;
+      // Row background
+      container.add(this.add.rectangle(-2, y + 15, pw - 20, 36, 0x111122, 0.85).setStrokeStyle(1, 0x333355));
+      // Name + level badge
+      container.add(this.add.text(-pw / 2 + 14, y + 4, def.name, { fontSize: '7px', color: lvColor[lv] }));
+      container.add(this.add.text(pw / 2 - 14, y + 4, `Lv${lv}`, { fontSize: '7px', color: lvColor[lv] }).setOrigin(1, 0));
+      // Progress
+      container.add(this.add.text(-pw / 2 + 14, y + 14, ResearchSystem.progressLabel(entry), { fontSize: '5px', color: '#666688' }));
+      // Stats at Lv1+
+      if (info.showStats) {
+        container.add(this.add.text(-pw / 2 + 14, y + 24, `HP ~${def.hp}  DMG ~${def.dmg}  ${def.archetype}  ${def.body ?? ''}`, { fontSize: '5px', color: '#aaaacc' }));
+      }
+      // Weakness at Lv2+
+      const save = SaveManager.load();
+      const wrongfooted = save?.wrongfooted ?? false;
+      if (info.showWeakness && def.elemFamily && !wrongfooted) {
+        const counter = def.counter ? `Counter: ${def.counter}` : `Family: ${def.elemFamily}`;
+        container.add(this.add.text(-pw / 2 + 14, y + 32, counter, { fontSize: '5px', color: '#aaffaa', wordWrap: { width: pw - 30 } }));
+      } else if (!info.showStats) {
+        container.add(this.add.text(-pw / 2 + 14, y + 24, 'Kill 5× to reveal stats', { fontSize: '5px', color: '#444466' }));
+      }
+    });
+
+    // Pagination
+    const navY = contentY + 20 + visibleCount * 40 + 6;
+    if (page > 0) {
+      const prevBtn = this.add.text(-60, navY, '◀ Prev', { fontSize: '7px', color: '#aaaaff', backgroundColor: '#222233', padding: { x: 6, y: 3 } })
+        .setOrigin(0.5).setInteractive({ useHandCursor: true });
+      prevBtn.on('pointerdown', () => {
+        this.bestiaryPage = page - 1;
+        container.destroy();
+        this.openGuildPanel('bestiary');
+      });
+      container.add(prevBtn);
+    }
+    if (page < maxPage) {
+      const nextBtn = this.add.text(60, navY, 'Next ▶', { fontSize: '7px', color: '#aaaaff', backgroundColor: '#222233', padding: { x: 6, y: 3 } })
+        .setOrigin(0.5).setInteractive({ useHandCursor: true });
+      nextBtn.on('pointerdown', () => {
+        this.bestiaryPage = page + 1;
+        container.destroy();
+        this.openGuildPanel('bestiary');
+      });
+      container.add(nextBtn);
+    }
+    container.add(this.add.text(0, navY, `${page + 1}/${maxPage + 1}`, { fontSize: '6px', color: '#555577' }).setOrigin(0.5));
+  }
+
+  private buildGuildInvestigation(container: Phaser.GameObjects.Container, contentY: number, pw: number, ph: number): void {
+    container.add(this.add.text(0, contentY + 6, 'INVESTIGATION LOG (SUMMON CLUES)', {
+      fontSize: '8px', color: '#aaffdd',
+    }).setOrigin(0.5));
+
+    const meta = SaveManager.loadAccountMeta();
+    const clues = meta.discoveredClues ?? [];
+
+    if (clues.length === 0) {
+      container.add(this.add.text(0, contentY + 60, 'No clues discovered yet.\nExplore library rooms in the dungeon.', {
+        fontSize: '7px', color: '#888899', align: 'center'
+      }).setOrigin(0.5));
+      return;
+    }
+
+    clues.forEach((clue, i) => {
+      const y = contentY + 28 + i * 28;
+      // Bordered card for each clue
+      container.add(this.add.rectangle(0, y + 8, pw - 30, 24, 0x111122, 0.85).setStrokeStyle(1, 0x444466));
+      container.add(this.add.text(-pw/2 + 22, y + 2, clue, {
+        fontSize: '6px', color: '#ddccff', wordWrap: { width: pw - 50 }
+      }));
+    });
+  }
+
+  private showMonolithLore(): void {
+    const lines = [
+      '"Know this, traveler:',
+      ' The dungeon is a living anomaly. When a hero dies within,',
+      ' the dungeon resets reality to a moment before their entry.',
+      ' A new soul wakes in town, yet the history of your past runs',
+      ' remains written in the Guild\'s Graveyard."',
+      '',
+      '"Your failures literally populate the world. Choose your destiny."',
+    ];
+
+    const sw = this.scale.width, sh = this.scale.height;
+    if (this.children.getByName('monolith_panel')) return;
+    const c = this.add.container(sw / 2, sh * 0.65).setDepth(30).setName('monolith_panel').setScrollFactor(0);
+    const pw = 300, ph = 80 + lines.length * 16;
+    c.add(this.add.rectangle(0, 0, pw, ph, 0x07050d, 0.95).setStrokeStyle(1.5, 0x5a3aa3));
+    c.add(this.add.text(0, -ph / 2 + 12, 'ANCIENT MONOLITH', { fontSize: '8px', color: '#8866cc' }).setOrigin(0.5));
+    lines.forEach((line, i) => {
+      c.add(this.add.text(0, -ph / 2 + 32 + i * 16, line, { fontSize: '7px', color: '#ccaaff', wordWrap: { width: pw - 20 }, align: 'center' }).setOrigin(0.5));
+    });
+    c.add(this.add.text(0, ph / 2 - 12, '[E or ESC] to dismiss', { fontSize: '6px', color: '#443366' }).setOrigin(0.5));
+
+    const close = () => c.destroy();
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' || e.key === 'e' || e.key === 'E') { close(); window.removeEventListener('keydown', handler); }
+    };
+    this.time.delayedCall(200, () => window.addEventListener('keydown', handler));
+    c.once('destroy', () => window.removeEventListener('keydown', handler));
+  }
+
   private addDecorations(): void {
     const wx = (c: number) => (c + 0.5) * TILE;
     const wy = (r: number) => (r + 0.5) * TILE;
@@ -193,6 +755,9 @@ export class TownScene extends Phaser.Scene {
       this.decorGroup.add(img);
     }
 
+    // §25 Ancient Monolith near central fountain
+    block('town_shrine', 30, 25, 24, 24, 3);
+
     // ── Guards — stoic, armored, unsmiling ───────────────────────────────────────
     this.add.image(wx(25), wy(37.5), 'npc_guard').setDepth(5);
     this.add.image(wx(38), wy(37.5), 'npc_guard').setDepth(5).setFlipX(true);
@@ -218,12 +783,17 @@ export class TownScene extends Phaser.Scene {
     // ── A single dark bench in the square — the only resting place ───────────────
     deco('town_bench', 28, 22, 3); deco('town_bench', 33, 22, 3);
 
+    // ── Wandering Stall — market lane, east side ─────────────────────────────────
+    this.add.image(wx(42), wy(27), 'town_barrel').setDepth(3).setTint(0x886622);
+    this.add.text(wx(42), wy(26.2), '?  STALL', { fontSize: '6px', color: '#886622' }).setOrigin(0.5).setDepth(5);
+
     // ── Building labels — small, worn, no icons ──────────────────────────────────
     this.add.text(wx(5.5),  wy(0.5),  'ARMORY',         { fontSize: '7px', color: '#5a4a30' }).setOrigin(0.5).setDepth(5);
     this.add.text(wx(31),   wy(0.5),  'THE LAST INN',   { fontSize: '7px', color: '#5a4a30' }).setOrigin(0.5).setDepth(5);
     this.add.text(wx(56.5), wy(0.5),  'EMPORIUM',       { fontSize: '7px', color: '#5a4a30' }).setOrigin(0.5).setDepth(5);
-    this.add.text(wx(6),    wy(31.6), 'CHAPEL',         { fontSize: '7px', color: '#3a3344' }).setOrigin(0.5).setDepth(5);
-    this.add.text(wx(56.5), wy(15.4), "SAGE'S TOWER",   { fontSize: '7px', color: '#7733aa' }).setOrigin(0.5).setDepth(5);
+    this.add.text(wx(6),    wy(31.6), 'CHAPEL',            { fontSize: '7px', color: '#3a3344' }).setOrigin(0.5).setDepth(5);
+    this.add.text(wx(56.5), wy(15.4), "SAGE'S TOWER",      { fontSize: '7px', color: '#7733aa' }).setOrigin(0.5).setDepth(5);
+    this.add.text(wx(56.5), wy(31.4), "ADVENTURER'S GUILD", { fontSize: '6px', color: '#886622' }).setOrigin(0.5).setDepth(5);
     // Town name — faded
     this.add.text(wx(31.5), wy(-0.5), 'NIGHTFALL', { fontSize: '10px', color: '#443355' }).setOrigin(0.5).setDepth(5);
     // Dungeon gate inscriptions

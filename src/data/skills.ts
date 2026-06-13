@@ -41,13 +41,13 @@ const SWORDMAN_TREE: ClassSkillTree = {
   classId: 'swordman',
   signatureName: 'Riposte Stance',
   signatureDesc: 'Active Parry. When hit in this stance, parry damage and execute a 100% crit Riposte thrust.',
-  capstone: node('sword_cap', 'Perfect Tempo', 'Capstone', 5, 'active', 'Capstone: Deals flurry of 3 quick hits. Connecting refunds 50% of active skill cooldowns.', { cd: 45000, stam: 20 }),
+  capstone: node('sword_cap', 'Perfect Tempo', 'Capstone', 5, 'active', 'Capstone: Perfect dodge resets one skill cooldown. Also: flurry of 3 quick hits on V — connecting refunds 50% of active cooldowns.', { cd: 45000, stam: 20 }),
   nodes: [
     // Branch 1: Blade
     node('sword_b1_t1', 'Blade Mastery', 'Blade', 1, 'passive', '+15% Melee damage.'),
     node('sword_b1_t2', 'Blade Combo', 'Blade', 2, 'passive', 'Third light combo hit deals +20% damage.', { req: ['sword_b1_t1'] }),
-    node('sword_b1_t3', 'Sharp Blade', 'Blade', 3, 'passive', 'Edge gauge decays 30% slower.', { req: ['sword_b1_t2'] }),
-    node('sword_b1_t4', 'Blade Thrust', 'Blade', 4, 'active', 'Lunge forward quickly, dealing 1.4x damage and high poise damage.', { req: ['sword_b1_t3'], cd: 4000, stam: 10 }),
+    node('sword_b1_t3', 'Bleed on Crit', 'Blade', 3, 'passive', 'Critical hits apply Bleed build-up (+40). Works on every melee/ranged crit.', { req: ['sword_b1_t2'] }),
+    node('sword_b1_t4', 'Crescent Lunge', 'Blade', 4, 'active', 'Lunge forward, dealing 1.4× damage with high poise. A weapon art of the blade.', { req: ['sword_b1_t3'], cd: 4000, stam: 10 }),
 
     // Branch 2: Guard
     node('sword_b2_t1', 'Parry Focus', 'Guard', 1, 'passive', 'Signature stance parry window extended by 200ms.'),
@@ -117,7 +117,7 @@ const TANKER_TREE: ClassSkillTree = {
     node('tank_b3_t1', 'Heavy Impact', 'Impact', 1, 'passive', 'Mace and hammer poise damage increased by 25%.'),
     node('tank_b3_t2', 'Shield Bash', 'Impact', 2, 'passive', 'Critical hits stagger and stun target for 500ms.', { req: ['tank_b3_t1'] }),
     node('tank_b3_t3', 'Stun Hammer', 'Impact', 3, 'passive', '+20% Damage dealt to staggered or stunned targets.', { req: ['tank_b3_t2'] }),
-    node('tank_b3_t4', 'Ground Tremor', 'Impact', 4, 'passive', 'Basic attacks have a 15% chance to trigger mini-stagger.', { req: ['tank_b3_t3'] }),
+    node('tank_b3_t4', 'Ground Slam', 'Impact', 4, 'passive', 'Basic attacks have a 15% chance to deal AoE knockback + KO build-up in 50px radius (Ground Slam mini-proc).', { req: ['tank_b3_t3'] }),
   ]
 };
 
@@ -168,8 +168,8 @@ const SAGE_TREE: ClassSkillTree = {
     // Branch 2: Glyph
     node('sage_b2_t1', 'Glyph Focus', 'Glyph', 1, 'passive', 'Tome glyph marker placing cost reduced by 4 MP.'),
     node('sage_b2_t2', 'Glyph Blast', 'Glyph', 2, 'active', 'Trigger a localized shockwave blast matching active element.', { req: ['sage_b2_t1'], cd: 5000, mp: 15 }),
-    node('sage_b2_t3', 'Healing Glyph', 'Glyph', 3, 'passive', 'Standing near your active glyph heals you for 3 HP per second.', { req: ['sage_b2_t2'] }),
-    node('sage_b2_t4', 'Glyph Trap', 'Glyph', 4, 'passive', 'Enemies that pass through glyph are slowed by 60% for 3 seconds.', { req: ['sage_b2_t3'] }),
+    node('sage_b2_t3', 'Slow Zone', 'Glyph', 3, 'passive', 'Enemies within glyph radius are slowed by 40%; standing near glyph heals 3 HP/s.', { req: ['sage_b2_t2'] }),
+    node('sage_b2_t4', 'Glyph Storm', 'Glyph', 4, 'passive', 'Glyph Blast chains to 2 additional nearby enemies and triggers element reactions. The Glyph Storm art.', { req: ['sage_b2_t3'] }),
 
     // Branch 3: Mysticism
     node('sage_b3_t1', 'Mana Flow', 'Mysticism', 1, 'passive', '+20% Mana regeneration rate.'),

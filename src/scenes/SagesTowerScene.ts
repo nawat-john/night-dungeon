@@ -148,7 +148,7 @@ export class SagesTowerScene extends Phaser.Scene {
   }
 
   private openSageServices(): void {
-    let mode: 'main' | 'respec' | 'enchant' | 'socket_item' | 'socket_rune' | 'transmute' = 'main';
+    let mode: 'main' | 'respec' | 'enchant' | 'socket_item' | 'socket_rune' | 'transmute' | 'salvage' = 'main';
     let selectedItemIndex = 0;
     let selectedRuneIndex = 0;
 
@@ -172,6 +172,7 @@ export class SagesTowerScene extends Phaser.Scene {
           '2. Enchant Gear (Reroll Affixes)',
           '3. Socket Runes',
           '4. Transmute Materials',
+          '5. Salvage Gear',
         ];
         choices.forEach((choice, i) => {
           c.add(this.add.text(-60, -ph/2 + 80 + i * 22, choice, { fontSize: '10px', color: '#ccccee' }));
@@ -312,16 +313,52 @@ export class SagesTowerScene extends Phaser.Scene {
 
         const oreQty = countInInventory(save.inventory, 'iron_ore');
         const ms1Qty = countInInventory(save.inventory, 'mana_stone_1');
+        const ms2Qty = countInInventory(save.inventory, 'mana_stone_2');
+        const ms3Qty = countInInventory(save.inventory, 'mana_stone_3');
 
-        c.add(this.add.text(-pw/2+20, -ph/2 + 70, `1. Transmute Iron Ore ➔ Dragon Scale`, { fontSize: '9px', color: '#ffffff' }));
-        c.add(this.add.text(-pw/2+32, -ph/2 + 84, `Cost: 3x Iron Ore (You have: ${oreQty}) + 50g`, { fontSize: '8px', color: '#998bbb' }));
-        c.add(this.add.text(-pw/2+32, -ph/2 + 96, `Chance: 50% success rate`, { fontSize: '8px', color: '#ffaa66' }));
+        c.add(this.add.text(-pw/2+20, -ph/2 + 55, `1. Iron Ore ➔ Dragon Scale (3x Ore + 50g, 50% Success) [Own: ${oreQty}]`, { fontSize: '7px', color: '#ffffff' }));
+        c.add(this.add.text(-pw/2+20, -ph/2 + 80, `2. Mana Stone 1 ➔ Stone 2 (3x MS1 + 80g) [Own: ${ms1Qty}]`, { fontSize: '7px', color: '#ffffff' }));
+        c.add(this.add.text(-pw/2+20, -ph/2 + 105, `3. Mana Stone 2 ➔ Stone 3 (3x MS2 + 150g) [Own: ${ms2Qty}]`, { fontSize: '7px', color: '#ffffff' }));
+        c.add(this.add.text(-pw/2+20, -ph/2 + 130, `4. Mana Stone 3 ➔ Stone 4 (3x MS3 + 300g) [Own: ${ms3Qty}]`, { fontSize: '7px', color: '#ffffff' }));
 
-        c.add(this.add.text(-pw/2+20, -ph/2 + 130, `2. Transmute Lv1 Mana Stone ➔ Lv2 Mana Stone`, { fontSize: '9px', color: '#ffffff' }));
-        c.add(this.add.text(-pw/2+32, -ph/2 + 144, `Cost: 3x Lv1 Mana Stone (You have: ${ms1Qty}) + 80g`, { fontSize: '8px', color: '#998bbb' }));
-        c.add(this.add.text(-pw/2+32, -ph/2 + 156, `Chance: 100% success rate`, { fontSize: '8px', color: '#88ffaa' }));
+        c.add(this.add.text(0, ph/2-14, '1/2/3/4: Transmute   Q/Esc: Back', { fontSize: '8px', color: '#665577' }).setOrigin(0.5));
+      }
+      else if (mode === 'salvage') {
+        c.add(this.add.text(0, -ph/2 + 38, '=== SALVAGE GEAR ===', { fontSize: '9px', color: '#9933cc' }).setOrigin(0.5));
 
-        c.add(this.add.text(0, ph/2-14, '1 or 2: Transmute   Q/Esc: Back', { fontSize: '8px', color: '#665577' }).setOrigin(0.5));
+        const gearList: { index: number; item: ItemInstance }[] = [];
+        save.inventory.forEach((item, idx) => {
+          if (isEquipment(item.itemId)) gearList.push({ index: idx, item });
+        });
+
+        if (gearList.length === 0) {
+          c.add(this.add.text(0, 0, 'No gear found to salvage.', { fontSize: '9px', color: '#ff4444' }).setOrigin(0.5));
+          c.add(this.add.text(0, ph/2-14, 'Q/Esc: Back', { fontSize: '8px', color: '#665577' }).setOrigin(0.5));
+        } else {
+          const start = Math.max(0, Math.min(gearList.length - 3, selectedItemIndex - 1));
+          const visibleList = gearList.slice(start, start + 3);
+
+          visibleList.forEach((entry, i) => {
+            const actualIdx = start + i;
+            const active = actualIdx === selectedItemIndex;
+            const iy = -ph/2 + 56 + i * 36;
+
+            const name = ITEMS[entry.item.itemId]?.name ?? 'Gear';
+            const rarity = (entry.item.rarity ?? 'common').toUpperCase();
+
+            c.add(this.add.text(-pw/2+14, iy,
+              `${active ? '> ' : '  '}${name} (${rarity})`,
+              { fontSize: '8px', color: active ? '#ffffff' : '#887799' }
+            ));
+
+            const returnMats = entry.item.rarity === 'mythic' ? '2x Dragon Scale, 2x Lv3 Mana Stone'
+                             : entry.item.rarity === 'legendary' ? '1x Dragon Scale, 1x Lv2 Mana Stone'
+                             : '2x Iron Ore';
+            c.add(this.add.text(-pw/2+24, iy + 12, `Yields: ${returnMats}`, { fontSize: '7px', color: '#aaffaa' }));
+          });
+
+          c.add(this.add.text(0, ph/2-14, 'UP/DOWN: Navigate   ENTER: Salvage Item   Q/Esc: Back', { fontSize: '8px', color: '#665577' }).setOrigin(0.5));
+        }
       }
     };
 
@@ -335,6 +372,7 @@ export class SagesTowerScene extends Phaser.Scene {
         else if (e.key === '2') { mode = 'enchant'; selectedItemIndex = 0; render(); }
         else if (e.key === '3') { mode = 'socket_item'; selectedItemIndex = 0; render(); }
         else if (e.key === '4') { mode = 'transmute'; render(); }
+        else if (e.key === '5') { mode = 'salvage'; selectedItemIndex = 0; render(); }
         else if (e.key === 'q' || e.key === 'Q' || e.key === 'Escape') {
           c.destroy(); this.activePanel = null; window.removeEventListener('keydown', handler);
         }
@@ -503,6 +541,8 @@ export class SagesTowerScene extends Phaser.Scene {
       else if (mode === 'transmute') {
         const oreQty = countInInventory(save.inventory, 'iron_ore');
         const ms1Qty = countInInventory(save.inventory, 'mana_stone_1');
+        const ms2Qty = countInInventory(save.inventory, 'mana_stone_2');
+        const ms3Qty = countInInventory(save.inventory, 'mana_stone_3');
 
         if (e.key === '1') {
           if (oreQty >= 3 && save.gold >= 50) {
@@ -528,14 +568,90 @@ export class SagesTowerScene extends Phaser.Scene {
             this.player.addGold(-80);
             save.gold = this.player.gold;
             this.consumeInventoryItem(save.inventory, 'mana_stone_1', 3);
-            
+
             addToInventory(save.inventory, 'mana_stone_2', 1);
             this.showToast('Transmutation Success: Gained Lv2 Mana Stone!');
-            
+
             SaveManager.write(save);
             render();
           } else {
             this.showToast('Need 3x Lv1 Mana Stone and 80g!');
+          }
+        }
+        else if (e.key === '3') {
+          if (ms2Qty >= 3 && save.gold >= 150) {
+            this.player.addGold(-150);
+            save.gold = this.player.gold;
+            this.consumeInventoryItem(save.inventory, 'mana_stone_2', 3);
+
+            addToInventory(save.inventory, 'mana_stone_3', 1);
+            this.showToast('Transmutation Success: Gained Lv3 Mana Stone!');
+
+            SaveManager.write(save);
+            render();
+          } else {
+            this.showToast('Need 3x Lv2 Mana Stone and 150g!');
+          }
+        }
+        else if (e.key === '4') {
+          if (ms3Qty >= 3 && save.gold >= 300) {
+            this.player.addGold(-300);
+            save.gold = this.player.gold;
+            this.consumeInventoryItem(save.inventory, 'mana_stone_3', 3);
+
+            addToInventory(save.inventory, 'mana_stone_4', 1);
+            this.showToast('Transmutation Success: Gained Lv4 Mana Stone!');
+
+            SaveManager.write(save);
+            render();
+          } else {
+            this.showToast('Need 3x Lv3 Mana Stone and 300g!');
+          }
+        }
+        if (e.key === 'q' || e.key === 'Q' || e.key === 'Escape') { mode = 'main'; render(); }
+      }
+      else if (mode === 'salvage') {
+        const gearList: { index: number; item: ItemInstance }[] = [];
+        save.inventory.forEach((item, idx) => {
+          if (isEquipment(item.itemId)) gearList.push({ index: idx, item });
+        });
+
+        if (e.key === 'ArrowUp') {
+          if (gearList.length > 0) {
+            selectedItemIndex = (selectedItemIndex - 1 + gearList.length) % gearList.length;
+            render();
+          }
+        }
+        else if (e.key === 'ArrowDown') {
+          if (gearList.length > 0) {
+            selectedItemIndex = (selectedItemIndex + 1) % gearList.length;
+            render();
+          }
+        }
+        else if (e.key === 'Enter' && gearList.length > 0) {
+          const entry = gearList[selectedItemIndex];
+          if (entry) {
+            // Remove from inventory
+            save.inventory.splice(entry.index, 1);
+
+            // Gaining yield
+            const rarity = entry.item.rarity ?? 'common';
+            if (rarity === 'mythic') {
+              addToInventory(save.inventory, 'dragon_scale', 2);
+              addToInventory(save.inventory, 'mana_stone_3', 2);
+              this.showToast('Salvaged: Gained 2x Dragon Scale, 2x Lv3 Mana Stone!');
+            } else if (rarity === 'legendary') {
+              addToInventory(save.inventory, 'dragon_scale', 1);
+              addToInventory(save.inventory, 'mana_stone_2', 1);
+              this.showToast('Salvaged: Gained 1x Dragon Scale, 1x Lv2 Mana Stone!');
+            } else {
+              addToInventory(save.inventory, 'iron_ore', 2);
+              this.showToast('Salvaged: Gained 2x Iron Ore!');
+            }
+
+            SaveManager.write(save);
+            selectedItemIndex = 0;
+            render();
           }
         }
         if (e.key === 'q' || e.key === 'Q' || e.key === 'Escape') { mode = 'main'; render(); }

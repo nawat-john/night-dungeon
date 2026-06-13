@@ -5,20 +5,56 @@ import { ClassId } from '../types';
 const FRAME_W = 32;
 const FRAME_H = 48;
 
-type ClipName = 'idle_down' | 'idle_up' | 'idle_side' | 'walk_down' | 'walk_up' | 'walk_side';
+type ClipName =
+  | 'idle_down' | 'idle_up' | 'idle_side'
+  | 'walk_down' | 'walk_up' | 'walk_side'
+  | 'attack_down' | 'attack_up' | 'attack_side'
+  | 'hurt' | 'die';
+
 const CLIPS: { name: ClipName; count: number }[] = [
-  { name: 'idle_down', count: 2 }, { name: 'idle_up',   count: 2 },
-  { name: 'idle_side', count: 2 }, { name: 'walk_down', count: 4 },
-  { name: 'walk_up',   count: 4 }, { name: 'walk_side', count: 4 },
+  { name: 'idle_down',   count: 2 }, { name: 'idle_up',     count: 2 },
+  { name: 'idle_side',   count: 2 }, { name: 'walk_down',   count: 4 },
+  { name: 'walk_up',     count: 4 }, { name: 'walk_side',   count: 4 },
+  { name: 'attack_down', count: 3 }, { name: 'attack_up',   count: 3 },
+  { name: 'attack_side', count: 3 }, { name: 'hurt',        count: 2 },
+  { name: 'die',         count: 4 },
 ];
 const CLASS_IDS: ClassId[] = ['swordman', 'archer', 'tanker', 'assassin', 'sage'];
+type RaceId = 'human' | 'elf' | 'dwarf' | 'barbarian' | 'beastman';
+const RACE_IDS: RaceId[] = ['human', 'elf', 'dwarf', 'barbarian', 'beastman'];
+
+interface RacePalette { skin: string; skin_dk: string; eye: string; hair: string; hair_dk: string; }
+const RACE_PALETTES: Record<RaceId, RacePalette> = {
+  human:    { skin: '#e8b88e', skin_dk: '#c49268', eye: '#2c2c40', hair: '#5a3818',  hair_dk: '#3a2410' },
+  elf:      { skin: '#f0d8b8', skin_dk: '#d4bc98', eye: '#404868', hair: '#e0e0a0',  hair_dk: '#b0b060' },
+  dwarf:    { skin: '#c8906a', skin_dk: '#a87050', eye: '#483028', hair: '#8a4a18',  hair_dk: '#5a3010' },
+  barbarian:{ skin: '#c87850', skin_dk: '#a85a38', eye: '#602010', hair: '#2a1008',  hair_dk: '#1a0808' },
+  beastman: { skin: '#908068', skin_dk: '#705848', eye: '#804020', hair: '#403028',  hair_dk: '#281808' },
+};
 const ENEMY_IDS = [
-  'bat', 'spider', 'skeleton', 'golem', 'troll', 'goblin', 'goblin_shaman',
+  'bat', 'spider', 'skeleton', 'golem', 'troll', 'goblin', 'goblin_shaman', 'cave_slime',
   // Floor 2
   'treant', 'forest_wisp', 'vine_snare',
   'ghoul', 'wraith', 'bone_golem',
   'frog_warrior', 'swamp_slug', 'water_serpent',
   'rock_crab', 'stone_imp', 'cave_drake',
+  'drowned', 'reed_lurker', 'toad_caster',
+  // Floor 3 — fungal
+  'spore_brute', 'myconid', 'fungal_spider',
+  // Floor 4 — barracks
+  'skeleton_soldier', 'crossbow_wight', 'shield_revenant',
+  // Floor 5 — foundry
+  'ember_hound', 'forge_golem', 'cinder_mage',
+  // Floor 6 — frozen
+  'frost_wolf', 'ice_archer', 'glacial_knight',
+  // Floor 7 — catacombs
+  'wraith_shade', 'bone_colossus', 'cultist',
+  // Floor 8 — void
+  'void_spawn', 'riftling', 'maw',
+  // Floor 9 — court
+  'fallen_knight', 'arcane_sentinel', 'echo_shade',
+  // Floor 10 — throne
+  'iron_guardian', 'shadow_herald', 'void_herald',
 ];
 
 // Palette
@@ -52,9 +88,17 @@ export class PreloadScene extends Phaser.Scene {
 
   create(): void {
     this.buildCaveTileset();
-    for (const cls of CLASS_IDS) this.buildPlayerTexture(cls);
+    for (const cls of CLASS_IDS) {
+      this.buildPlayerTexture(cls, 'human');
+      for (const race of RACE_IDS) {
+        if (race !== 'human') this.buildPlayerTexture(cls, race);
+      }
+    }
     for (const id of ENEMY_IDS) this.buildEnemyTexture(id);
+    this.buildBossTextures();
     this.buildEffectTextures();
+    this.buildWeaponOverlays();
+    this.buildItemIcons();
     this.buildTownDecorations();
     this.buildDungeonDecos();
     this.buildTownExtras();
@@ -63,40 +107,427 @@ export class PreloadScene extends Phaser.Scene {
     this.scene.start('MainMenuScene');
   }
 
+  // ── Boss textures (one per boss, keyed as boss_<id>) ─────────────────────
+  private buildBossTextures(): void {
+    // Shared boss builder helper
+    const makeBoss = (key: string, drawFn: (f: (x:number,y:number,w:number,h:number,c:string)=>void) => void) => {
+      const bt = this.textures.createCanvas(key, 32, 48);
+      if (bt) { const ctx = bt.getContext(); drawFn(mk(ctx)); bt.refresh(); }
+    };
+
+    // Floor 1: Goblin Warlord — massive armored goblin with war club
+    makeBoss('boss_goblin_warlord', f => {
+      f(8, 36, 6, 12, '#3a5028'); f(18, 36, 6, 12, '#3a5028');
+      f(7, 14, 18, 23, '#3a5028'); f(7, 14, 18, 1, '#5a7040');
+      f(8, 15, 16, 21, '#4a6030');
+      f(3, 14, 5, 18, '#3a5028'); f(24, 14, 5, 18, '#3a5028');
+      // War club (left)
+      f(1, 8, 4, 20, '#5a3818'); f(0, 6, 6, 5, '#3a3028'); f(0, 6, 6, 1, '#5a4838');
+      // Spiked pauldrons
+      f(4, 13, 4, 3, '#5a5868'); f(4, 11, 2, 3, '#8a8898');
+      f(24, 13, 4, 3, '#5a5868'); f(26, 11, 2, 3, '#8a8898');
+      // Head (oversized goblin war helm)
+      f(9, 2, 14, 13, '#3a5028'); f(10, 1, 12, 14, '#3a5028');
+      f(10, 2, 12, 12, '#4a6030');
+      // Iron crown
+      f(9, 0, 14, 3, '#5a5868'); f(9, 0, 14, 1, '#9a98b0');
+      f(10, 2, 2, 3, '#9a98b0'); f(14, 2, 4, 4, '#9a98b0'); f(20, 2, 2, 3, '#9a98b0');
+      // Face
+      f(11, 5, 10, 9, '#3a7034'); f(12, 5, 8, 1, '#4a8844');
+      f(12, 8, 3, 3, '#e8c820'); f(18, 8, 3, 3, '#e8c820');
+      f(13, 8, 1, 1, '#ffee50'); f(19, 8, 1, 1, '#ffee50');
+      f(13, 12, 6, 2, '#1a2818');
+    });
+
+    // Floor 2: The Drowned King — undead aquatic sovereign
+    makeBoss('boss_drowned_king', f => {
+      f(9, 36, 6, 12, '#1a3050'); f(18, 36, 6, 12, '#1a3050');
+      f(7, 13, 18, 24, '#1a3050'); f(7, 13, 18, 1, '#3060a0');
+      f(8, 14, 16, 22, '#24405e');
+      f(2, 13, 6, 20, '#1a3050'); f(24, 13, 6, 20, '#1a3050');
+      // Trident (right)
+      f(25, 2, 2, 28, '#7a8090'); f(23, 2, 6, 2, '#9aabb8');
+      f(23, 4, 2, 4, '#9aabb8'); f(25, 4, 2, 4, '#9aabb8'); f(27, 4, 2, 4, '#9aabb8');
+      // Drowned crown
+      f(8, 0, 16, 4, '#c0a030'); f(8, 0, 16, 1, '#e0c040');
+      f(9, 3, 2, 4, '#c0a030'); f(14, 2, 4, 5, '#e0c040'); f(21, 3, 2, 4, '#c0a030');
+      // Head
+      f(9, 3, 14, 12, '#1a3050'); f(10, 2, 12, 13, '#24405e');
+      f(11, 5, 10, 10, '#28485e');
+      f(12, 8, 3, 3, '#00aaff'); f(18, 8, 3, 3, '#00aaff');
+      f(13, 8, 1, 2, '#80ddff'); f(19, 8, 1, 2, '#80ddff');
+      f(10, 13, 12, 2, '#1a3050'); f(11, 13, 2, 1, '#c8d0b0'); f(15, 13, 2, 1, '#c8d0b0');
+      // Coral/seaweed decoration
+      f(6, 16, 2, 8, '#1a5020'); f(24, 18, 2, 6, '#1a5020');
+    });
+
+    // Floor 3: Brood Matron — giant spider matriarch
+    makeBoss('boss_brood_matron', f => {
+      // Eight legs
+      f(1,  22, 7, 3, '#2c1828'); f(0, 25, 6, 8, '#2c1828');
+      f(8,  22, 6, 3, '#2c1828'); f(7, 25, 5, 8, '#2c1828');
+      f(18, 22, 6, 3, '#2c1828'); f(19, 25, 5, 8, '#2c1828');
+      f(24, 22, 7, 3, '#2c1828'); f(26, 25, 6, 8, '#2c1828');
+      // Massive abdomen (egg-sac)
+      f(5, 26, 22, 18, '#3a1a30'); f(3, 30, 26, 14, '#3a1a30');
+      f(5, 27, 22, 16, '#4a2240');
+      f(10, 30, 12, 10, '#5a2a50'); f(12, 32, 8, 6, '#7a3a6a');
+      // Venom drip
+      f(14, 44, 4, 6, '#00aa40'); f(15, 44, 2, 4, '#40ff60');
+      // Cephalothorax
+      f(8, 14, 16, 14, '#3a1a30'); f(9, 13, 14, 15, '#4a2240');
+      // Fangs
+      f(11, 26, 4, 5, '#c8d0b0'); f(17, 26, 4, 5, '#c8d0b0');
+      f(12, 24, 2, 4, '#e0e8c0'); f(18, 24, 2, 4, '#e0e8c0');
+      // Eight eyes
+      f(10, 16, 3, 2, '#e03030'); f(13, 15, 3, 2, '#e03030'); f(16, 15, 3, 2, '#e03030'); f(19, 16, 3, 2, '#e03030');
+      f(11, 16, 1, 1, '#ff8080'); f(14, 15, 1, 1, '#ff8080'); f(17, 15, 1, 1, '#ff8080'); f(20, 16, 1, 1, '#ff8080');
+    });
+
+    // Floor 4: Sir Mordrek — corrupted armored knight
+    makeBoss('boss_sir_mordrek', f => {
+      f(9, 36, 6, 12, '#2a2838'); f(18, 36, 6, 12, '#2a2838');
+      f(7, 13, 18, 24, '#2a2838'); f(7, 13, 18, 1, '#5a5868');
+      f(8, 14, 16, 22, '#34323e');
+      f(2, 13, 6, 20, '#2a2838'); f(24, 13, 6, 20, '#2a2838');
+      // Tower shield (left)
+      f(0, 11, 8, 22, '#3a3848'); f(0, 11, 8, 1, '#5a5868');
+      f(1, 13, 6, 18, '#44424e');
+      f(2, 16, 4, 2, '#c0901c'); f(3, 14, 2, 8, '#c0901c');
+      // Longsword (right)
+      f(26, 3, 2, 28, '#c0c8d8'); f(26, 3, 2, 1, '#e0e8f0');
+      f(23, 6, 8, 2, '#9a98b0'); f(26, 1, 2, 4, '#6a6878');
+      // Grand helm
+      f(8, 1, 16, 14, '#2a2838'); f(9, 0, 14, 15, '#2a2838');
+      f(9, 1, 14, 13, '#34323e');
+      f(9, 1, 14, 1, '#c0901c'); // gold crown-line
+      // Visor
+      f(10, 8, 12, 4, '#1a1828');
+      f(11, 9, 4, 2, '#cc2020'); f(17, 9, 4, 2, '#cc2020');
+    });
+
+    // Floor 5: Forgefather Brand — massive forge elemental
+    makeBoss('boss_forgefather_brand', f => {
+      f(8, 36, 7, 12, '#2a1808'); f(17, 36, 7, 12, '#2a1808');
+      f(6, 13, 20, 24, '#2a1808'); f(6, 13, 20, 1, '#5a3818');
+      f(7, 14, 18, 22, '#382010');
+      f(1, 12, 6, 22, '#2a1808'); f(25, 12, 6, 22, '#2a1808');
+      // Forge core (chest glowing)
+      f(10, 17, 12, 12, '#1a0800');
+      f(11, 18, 10, 10, '#cc3000');
+      f(12, 19, 8, 8, '#ff6600');
+      f(13, 20, 6, 6, '#ffcc00');
+      f(14, 21, 4, 4, '#ffffff');
+      // Exhaust arms
+      f(0, 20, 3, 8, '#cc3000'); f(1, 18, 2, 12, '#ff6600');
+      f(29, 20, 3, 8, '#cc3000'); f(29, 18, 2, 12, '#ff6600');
+      // Forge hammer (right)
+      f(25, 8, 5, 16, '#4a3818'); f(23, 6, 9, 5, '#3a2830'); f(23, 6, 9, 1, '#5a4848');
+      // Forge helm (iron/fire)
+      f(8, 1, 16, 13, '#2a1808'); f(9, 0, 14, 14, '#2a1808');
+      f(9, 1, 14, 12, '#382010');
+      f(9, 0, 14, 1, '#cc3000'); // fire crown
+      f(10, 7, 5, 4, '#1a0800'); f(17, 7, 5, 4, '#1a0800');
+      f(11, 8, 3, 2, '#ff6600'); f(18, 8, 3, 2, '#ff6600');
+      f(12, 8, 1, 1, '#ffffff'); f(19, 8, 1, 1, '#ffffff');
+    });
+
+    // Floor 6: Frost Warden Ysold — ice-encased guardian
+    makeBoss('boss_frost_warden_ysold', f => {
+      f(9, 36, 6, 12, '#1a2840'); f(18, 36, 6, 12, '#1a2840');
+      f(7, 13, 18, 24, '#1a2840'); f(7, 13, 18, 1, '#4070b0');
+      f(8, 14, 16, 22, '#24364e');
+      f(2, 13, 6, 20, '#1a2840'); f(24, 13, 6, 20, '#1a2840');
+      // Ice antlers (branching)
+      f(11, 0, 2, 8, '#80b0e0'); f(9, 0, 2, 5, '#90c0f0'); f(13, 2, 2, 6, '#80b0e0');
+      f(19, 0, 2, 8, '#80b0e0'); f(21, 0, 2, 5, '#90c0f0'); f(17, 2, 2, 6, '#80b0e0');
+      // Ice spear (right)
+      f(26, 1, 2, 30, '#90c0e8'); f(26, 1, 2, 2, '#c0e0ff');
+      f(25, 2, 4, 2, '#80a0d0');
+      // Head in ice crown
+      f(8, 2, 16, 13, '#1a2840'); f(9, 1, 14, 14, '#24364e');
+      f(9, 2, 14, 12, '#304858');
+      // Ice crown top
+      f(10, 0, 4, 3, '#4070b0'); f(10, 0, 4, 1, '#90c0f0');
+      f(18, 0, 4, 3, '#4070b0'); f(18, 0, 4, 1, '#90c0f0');
+      // Face
+      f(11, 7, 10, 8, '#28405a');
+      f(12, 9, 3, 3, '#40b0e0'); f(18, 9, 3, 3, '#40b0e0');
+      f(13, 9, 1, 2, '#f0f8ff'); f(19, 9, 1, 2, '#f0f8ff');
+      f(12, 13, 8, 2, '#1a2840'); f(13, 14, 2, 1, '#c0e0ff'); f(17, 14, 2, 1, '#c0e0ff');
+    });
+
+    // Floor 7: The Hollow Choir — twin-mask void entity
+    makeBoss('boss_hollow_choir', f => {
+      // Shifting void form
+      f(8, 28, 16, 16, '#140818');
+      f(6, 24, 20, 12, '#1a0e20');
+      f(7, 13, 18, 20, '#1a0e20'); f(7, 13, 18, 1, '#402060');
+      f(8, 14, 16, 18, '#241428');
+      // Flowing dark arms (wide)
+      f(1, 14, 8, 16, '#140818'); f(0, 18, 6, 10, '#0e0612');
+      f(23, 14, 8, 16, '#140818'); f(26, 18, 6, 10, '#0e0612');
+      // First mask (left, comedy)
+      f(7, 2, 8, 12, '#d0c890'); f(8, 1, 6, 13, '#d8d0a0');
+      f(9, 5, 2, 3, '#282030'); f(11, 4, 3, 4, '#282030');
+      f(9, 9, 6, 2, '#282030');
+      f(10, 7, 1, 2, '#3a3040'); f(12, 7, 1, 2, '#3a3040');
+      // Second mask (right, tragedy)
+      f(17, 2, 8, 12, '#d0c890'); f(17, 1, 8, 13, '#d8d0a0');
+      f(18, 5, 3, 3, '#282030'); f(22, 4, 2, 4, '#282030');
+      f(18, 9, 6, 2, '#282030');
+      f(18, 7, 1, 2, '#3a3040'); f(21, 7, 1, 2, '#3a3040');
+      // Void connection between masks
+      f(15, 4, 2, 10, '#4020a0');
+    });
+
+    // Floor 8: Riftmaw — void predator
+    makeBoss('boss_riftmaw', f => {
+      f(7, 30, 8, 14, '#0e0820'); f(17, 30, 8, 14, '#0e0820');
+      f(4, 16, 24, 18, '#0e0820'); f(2, 20, 28, 14, '#0e0820');
+      f(4, 17, 24, 16, '#150e2a');
+      // Rift tentacles
+      f(1, 22, 3, 18, '#0e0820'); f(0, 28, 3, 10, '#0a0618');
+      f(28, 22, 3, 18, '#0e0820'); f(29, 28, 3, 10, '#0a0618');
+      f(10, 40, 3, 8, '#0e0820'); f(19, 38, 3, 10, '#0e0820');
+      // Massive eye (single)
+      f(8, 6, 16, 12, '#0a0618');
+      f(9, 7, 14, 10, '#120e20');
+      f(11, 8, 10, 8, '#1a1430');
+      f(12, 9, 8, 6, '#2a1a50');
+      f(13, 10, 6, 4, '#6020e0');
+      f(14, 11, 4, 2, '#c040ff');
+      f(15, 11, 2, 1, '#ffffff');
+      // The Maw (enormous)
+      f(3, 17, 26, 10, '#060408');
+      f(4, 18, 24, 8, '#0a0810');
+      // Void teeth
+      for (let i = 0; i < 6; i++) {
+        f(4+i*4, 17, 2, 5, '#c0b898');
+        f(5+i*4, 25, 2, 4, '#b0a888');
+      }
+    });
+
+    // Floor 9a: Aeriel (light twin)
+    makeBoss('boss_twin_aeriel', f => {
+      f(9, 36, 6, 12, '#302858'); f(18, 36, 6, 12, '#302858');
+      f(7, 13, 18, 24, '#302858'); f(7, 13, 18, 1, '#8070c0');
+      f(8, 14, 16, 22, '#3c3068');
+      f(2, 12, 6, 22, '#302858'); f(24, 12, 6, 22, '#302858');
+      // Light wings
+      f(0, 8, 8, 18, '#4040a0'); f(0, 10, 6, 14, '#6060c8');
+      f(24, 8, 8, 18, '#4040a0'); f(26, 10, 6, 14, '#6060c8');
+      f(0, 8, 8, 1, '#9090e0'); f(24, 8, 8, 1, '#9090e0');
+      // Light spear
+      f(26, 0, 2, 28, '#e0e0f8'); f(26, 0, 2, 2, '#ffffff');
+      f(24, 2, 6, 2, '#c0c0e8');
+      // Head (silver crown)
+      f(9, 1, 14, 14, '#302858'); f(10, 0, 12, 15, '#3c3068');
+      f(10, 0, 12, 1, '#c0c0e8'); // silver crown
+      f(13, 7, 3, 3, '#a0c0ff'); f(17, 7, 3, 3, '#a0c0ff');
+      f(14, 7, 1, 2, '#ffffff'); f(18, 7, 1, 2, '#ffffff');
+    });
+
+    // Floor 9b: Mordael (shadow twin)
+    makeBoss('boss_twin_mordael', f => {
+      f(9, 36, 6, 12, '#201828'); f(18, 36, 6, 12, '#201828');
+      f(7, 13, 18, 24, '#201828'); f(7, 13, 18, 1, '#502858');
+      f(8, 14, 16, 22, '#2c2038');
+      f(2, 12, 6, 22, '#201828'); f(24, 12, 6, 22, '#201828');
+      // Shadow wings
+      f(0, 8, 8, 18, '#180820'); f(0, 10, 6, 14, '#200c2a');
+      f(24, 8, 8, 18, '#180820'); f(26, 10, 6, 14, '#200c2a');
+      f(0, 8, 8, 1, '#502858'); f(24, 8, 8, 1, '#502858');
+      // Shadow sword
+      f(26, 0, 2, 28, '#1c1028'); f(26, 0, 2, 2, '#6030a0');
+      f(23, 3, 8, 2, '#1c1028'); f(26, 1, 2, 3, '#4020a0');
+      // Head (dark crown)
+      f(9, 1, 14, 14, '#201828'); f(10, 0, 12, 15, '#2c2038');
+      f(10, 0, 12, 1, '#502858');
+      f(12, 0, 2, 3, '#6030a0'); f(15, 0, 2, 4, '#8040c0'); f(18, 0, 2, 3, '#6030a0');
+      f(13, 7, 3, 3, '#9030c0'); f(17, 7, 3, 3, '#9030c0');
+      f(14, 7, 1, 2, '#e080ff'); f(18, 7, 1, 2, '#e080ff');
+    });
+
+    // Floor 10: The Sovereign — final boss, divine/void fusion
+    makeBoss('boss_the_sovereign', f => {
+      f(8, 36, 7, 12, '#14101e'); f(17, 36, 7, 12, '#14101e');
+      f(6, 12, 20, 25, '#14101e'); f(6, 12, 20, 1, '#806090');
+      f(7, 13, 18, 23, '#1e1a2c');
+      f(0, 11, 7, 24, '#14101e'); f(25, 11, 7, 24, '#14101e');
+      // Four-armed divinity
+      f(0, 11, 4, 18, '#100c1c'); f(0, 25, 5, 8, '#100c1c');
+      f(28, 11, 4, 18, '#100c1c'); f(27, 25, 5, 8, '#100c1c');
+      // Void-gold chest sigil
+      f(11, 15, 10, 10, '#0a0818');
+      f(15, 13, 2, 16, '#806090'); f(11, 18, 10, 2, '#806090');
+      f(13, 15, 6, 2, '#c090d0');
+      // Void wings
+      f(0, 6, 6, 16, '#0c0820'); f(0, 8, 4, 12, '#180e30');
+      f(26, 6, 6, 16, '#0c0820'); f(28, 8, 4, 12, '#180e30');
+      f(0, 6, 6, 1, '#806090'); f(26, 6, 6, 1, '#806090');
+      // Head with divine crown
+      f(8, 1, 16, 12, '#14101e'); f(9, 0, 14, 13, '#1e1a2c');
+      f(9, 1, 14, 11, '#241e38');
+      // Sovereign crown
+      f(9, 0, 2, 4, '#c090d0'); f(13, 0, 6, 5, '#e0b8f0'); f(21, 0, 2, 4, '#c090d0');
+      f(10, 0, 12, 1, '#806090');
+      // Eyes (dual void-light)
+      f(11, 6, 4, 4, '#0e0820');
+      f(19, 6, 4, 4, '#0e0820');
+      f(12, 7, 2, 2, '#cc80ff'); f(20, 7, 2, 2, '#cc80ff');
+      f(12, 7, 1, 1, '#ffffff'); f(20, 7, 1, 1, '#ffffff');
+    });
+
+    // Floor 11: Dungeon Heart — the true final form
+    makeBoss('boss_dungeon_heart', f => {
+      f(7, 34, 9, 14, '#080410'); f(16, 34, 9, 14, '#080410');
+      f(4, 12, 24, 24, '#080410'); f(2, 18, 28, 14, '#080410');
+      f(4, 13, 24, 22, '#0e0820');
+      // Pulsing dark heart core
+      f(8, 14, 16, 20, '#140830');
+      f(9, 15, 14, 18, '#1e0e48');
+      f(10, 16, 12, 16, '#2e1460');
+      f(11, 17, 10, 14, '#4020a0');
+      f(12, 18, 8, 12, '#6030e0');
+      f(13, 19, 6, 10, '#9050f0');
+      f(14, 20, 4, 8, '#c070ff');
+      f(15, 21, 2, 6, '#e090ff');
+      // Void tendrils
+      f(1, 16, 4, 18, '#0e0820'); f(0, 20, 3, 12, '#080414');
+      f(27, 16, 4, 18, '#0e0820'); f(29, 20, 3, 12, '#080414');
+      f(10, 38, 4, 10, '#0e0820'); f(18, 36, 4, 12, '#0e0820');
+      // Eye cluster (top)
+      f(9, 3, 14, 10, '#0a0618');
+      f(10, 4, 12, 8, '#12092a');
+      f(10, 5, 4, 4, '#4020c0'); f(18, 5, 4, 4, '#4020c0');
+      f(11, 6, 2, 2, '#c060ff'); f(19, 6, 2, 2, '#c060ff');
+      f(11, 6, 1, 1, '#ffffff'); f(19, 6, 1, 1, '#ffffff');
+      f(14, 4, 4, 3, '#6030d0'); f(15, 4, 2, 1, '#e0a0ff'); // center eye
+    });
+
+    // Fallback placeholder (still kept for safety)
+    const bt = this.textures.createCanvas('boss_placeholder', 32, 48);
+    if (bt) {
+      const ctx = bt.getContext();
+      const f = mk(ctx);
+      f(8, 14, 16, 22, '#6a3090');
+      f(8, 36, 6,  8,  '#502878');
+      f(18, 36, 6, 8,  '#502878');
+      f(3,  14, 5, 16, '#502878');
+      f(24, 14, 5, 16, '#502878');
+      f(8,  14, 16, 2, '#d6ae4a');
+      f(8,  34, 16, 2, '#d6ae4a');
+      f(11, 4,  10, 10, '#e8b88e');
+      f(10, 3,  12, 2,  '#d6ae4a');
+      f(11, 1,  2,  3,  '#d6ae4a');
+      f(15, 0,  2,  4,  '#d6ae4a');
+      f(19, 1,  2,  3,  '#d6ae4a');
+      f(13, 7, 2, 2, '#e83030');
+      f(17, 7, 2, 2, '#e83030');
+      bt.refresh();
+    }
+
+    // Boss projectile: 12×12 orange energy orb
+    const pt = this.textures.createCanvas('proj_boss', 12, 12);
+    if (pt) {
+      const ctx = pt.getContext();
+      const f = mk(ctx);
+      f(4, 2,  4, 8,  '#ff6600');
+      f(2, 4,  8, 4,  '#ff6600');
+      f(4, 4,  4, 4,  '#ffcc00');
+      f(5, 5,  2, 2,  '#ffffff');
+      pt.refresh();
+    }
+  }
+
   // ── Cave Tileset ─────────────────────────────────────────────────────────────
   // index 1=cave floor  2=cave wall  3=grass  4=cobble  5=warp portal
-  // index 6=void        7=building interior
+  // index 6=void        7=building interior  8=pillar  9=floor-stones
+  // 10=forest  11=deadland  12=pond  13=rock
+  // 14=fungal  15=barracks  16=foundry  17=frozen  18=catacombs  19=void-floor  20=throne
+  // 21=otherworld       22=camp-ground
   private buildCaveTileset(): void {
-    // 13 tiles: floor, wall, grass, cobble, warp, void, interior, pillar, floor-stones
-    //           + forest-floor(10), dead-floor(11), pond-floor(12), rock-floor(13)
-    const tex = this.textures.createCanvas('tiles', TILE * 13, TILE);
+    const tex = this.textures.createCanvas('tiles', TILE * 22, TILE);
     if (!tex) throw new Error('createCanvas(tiles) failed');
     const ctx = tex.getContext();
 
-    this.drawCaveFloor(ctx,     0,       0);   // index 1
-    this.drawCaveWall(ctx,      TILE,    0);   // index 2
-    this.drawGrass(ctx,         TILE*2,  0);   // index 3
-    this.drawCobble(ctx,        TILE*3,  0);   // index 4
-    this.drawWarpPortal(ctx,    TILE*4,  0);   // index 5
-    // void (index 6)
+    this.drawCaveFloor(ctx,        0,        0);  // index 1
+    this.drawCaveWall(ctx,         TILE,     0);  // index 2
+    this.drawGrass(ctx,            TILE*2,   0);  // index 3
+    this.drawCobble(ctx,           TILE*3,   0);  // index 4
+    this.drawWarpPortal(ctx,       TILE*4,   0);  // index 5
     ctx.fillStyle = '#0d0b14';
-    ctx.fillRect(TILE * 5, 0, TILE, TILE);
-    // building interior (index 7)
-    this.drawBuildingRoof(ctx, TILE * 6, 0); // solid stone rooftop — no grid visible
-    // stone pillar (index 8)
-    this.drawStonePillar(ctx, TILE * 7, 0);
-    // floor stones / rubble (index 9)
-    this.drawFloorStones(ctx, TILE * 8, 0);
-    // forest floor (index 10)
-    this.drawForestFloor(ctx, TILE * 9, 0);
-    // deadland floor (index 11)
-    this.drawDeadFloor(ctx, TILE * 10, 0);
-    // pond floor (index 12)
-    this.drawPondFloor(ctx, TILE * 11, 0);
-    // rock floor (index 13)
-    this.drawRockFloor(ctx, TILE * 12, 0);
+    ctx.fillRect(TILE * 5, 0, TILE, TILE);         // index 6 — void
+    this.drawBuildingRoof(ctx,     TILE*6,   0);  // index 7
+    this.drawStonePillar(ctx,      TILE*7,   0);  // index 8
+    this.drawFloorStones(ctx,      TILE*8,   0);  // index 9
+    this.drawForestFloor(ctx,      TILE*9,   0);  // index 10
+    this.drawDeadFloor(ctx,        TILE*10,  0);  // index 11
+    this.drawPondFloor(ctx,        TILE*11,  0);  // index 12
+    this.drawRockFloor(ctx,        TILE*12,  0);  // index 13
+    this.drawFungalFloor(ctx,      TILE*13,  0);  // index 14
+    this.drawBarracksFloor(ctx,    TILE*14,  0);  // index 15
+    this.drawFoundryFloor(ctx,     TILE*15,  0);  // index 16
+    this.drawFrozenFloor(ctx,      TILE*16,  0);  // index 17
+    this.drawCatacombFloor(ctx,    TILE*17,  0);  // index 18
+    this.drawVoidFloor(ctx,        TILE*18,  0);  // index 19
+    this.drawThroneFloor(ctx,      TILE*19,  0);  // index 20
+    this.drawOtherworldFloor(ctx,  TILE*20,  0);  // index 21 — otherworld
+    this.drawCampGround(ctx,       TILE*21,  0);  // index 22 — camp ground
 
     tex.refresh();
+  }
+
+  private drawOtherworldFloor(ctx: CanvasRenderingContext2D, ox: number, oy: number): void {
+    const f = mk(ctx);
+    // Deep dark base — inter-dimensional void between dimensions
+    f(ox, oy, TILE, TILE, '#0a0618');
+    // Cracked crystalline floor pattern
+    f(ox+2,  oy+2,  6,  1, '#220a44'); f(ox+10, oy+2,  8,  1, '#220a44');
+    f(ox+1,  oy+6,  4,  1, '#220a44'); f(ox+8,  oy+5, 10,  1, '#220a44');
+    f(ox+3,  oy+12, 9,  1, '#220a44'); f(ox+15, oy+11, 8,  1, '#220a44');
+    f(ox+5,  oy+18, 6,  1, '#220a44'); f(ox+14, oy+17, 8,  1, '#220a44');
+    f(ox+2,  oy+24,10,  1, '#220a44'); f(ox+16, oy+25, 7,  1, '#220a44');
+    f(ox+4,  oy+29, 5,  1, '#220a44');
+    // Diagonal cracks
+    f(ox+8,  oy+3,  1,  8, '#1a0836'); f(ox+20, oy+10, 1, 10, '#1a0836');
+    f(ox+14, oy+20, 1,  7, '#1a0836'); f(ox+6,  oy+22, 1,  6, '#1a0836');
+    // Glowing rift veins
+    f(ox+9,  oy+8,  2,  2, '#4400aa'); f(ox+19, oy+14, 2,  2, '#4400aa');
+    f(ox+7,  oy+23, 2,  1, '#4400aa'); f(ox+14, oy+28, 3,  1, '#4400aa');
+    // Bright rift sparks
+    f(ox+10, oy+9,  1,  1, '#cc66ff'); f(ox+20, oy+15, 1,  1, '#cc66ff');
+    f(ox+8,  oy+23, 1,  1, '#cc66ff');
+    // Edge vignette
+    f(ox,    oy,    2, TILE, '#080412'); f(ox+TILE-2, oy, 2, TILE, '#080412');
+    f(ox,    oy,    TILE, 2, '#080412'); f(ox, oy+TILE-2, TILE, 2, '#080412');
+  }
+
+  private drawCampGround(ctx: CanvasRenderingContext2D, ox: number, oy: number): void {
+    const f = mk(ctx);
+    // Dark earth base
+    f(ox, oy, TILE, TILE, '#2a1e10');
+    // Dirt variation patches
+    f(ox+2,  oy+4,  8,  6, '#311f0f'); f(ox+14, oy+8,  10,  8, '#2e1c0e');
+    f(ox+5,  oy+18, 12, 6, '#341f0e'); f(ox+20, oy+20, 8,   6, '#2a1a08');
+    // Worn dirt path (centre area from use)
+    f(ox+8,  oy+8,  16, 16, '#3a2410');
+    f(ox+10, oy+10, 12, 12, '#3e2610');
+    // Scattered pebbles
+    f(ox+4,  oy+6,  2, 1, '#4a3828'); f(ox+22, oy+5,  2, 1, '#4a3828');
+    f(ox+7,  oy+22, 1, 1, '#4a3828'); f(ox+19, oy+24, 2, 1, '#4a3828');
+    f(ox+25, oy+14, 1, 1, '#4a3828'); f(ox+3,  oy+26, 1, 1, '#4a3828');
+    // Dry grass tufts
+    f(ox+1,  oy+2,  1, 3, '#4a5a20'); f(ox+3,  oy+1,  1, 2, '#3a4818');
+    f(ox+26, oy+3,  1, 3, '#4a5a20'); f(ox+28, oy+2,  1, 2, '#3a4818');
+    f(ox+1,  oy+26, 1, 3, '#4a5a20'); f(ox+28, oy+25, 1, 4, '#3a4818');
+    // Ash circle (old fire pit)
+    f(ox+13, oy+13, 6, 6, '#2a2218'); f(ox+14, oy+14, 4, 4, '#383028');
+    f(ox+15, oy+15, 2, 2, '#4a3a28'); // ash center
+    // Blackened stones around pit
+    f(ox+12, oy+12, 2, 1, '#1a1410'); f(ox+18, oy+12, 2, 1, '#1a1410');
+    f(ox+12, oy+19, 2, 1, '#1a1410'); f(ox+18, oy+19, 2, 1, '#1a1410');
   }
 
   private drawForestFloor(ctx: CanvasRenderingContext2D, ox: number, oy: number): void {
@@ -192,6 +623,144 @@ export class PreloadScene extends Phaser.Scene {
     f(ox+20, oy+4,  2, 1, '#4a4030');
     f(ox+8,  oy+20, 2, 1, '#4a4030');
     f(ox+25, oy+22, 2, 1, '#4a4030');
+  }
+
+  private drawFungalFloor(ctx: CanvasRenderingContext2D, ox: number, oy: number): void {
+    const f = mk(ctx);
+    f(ox, oy, TILE, TILE, '#1a1428');
+    f(ox,    oy,    14, 12, '#1e1a2e');
+    f(ox+15, oy,    17, 10, '#1a1628');
+    f(ox,    oy+13, 10, 11, '#201c30');
+    f(ox+11, oy+11, 15, 11, '#1c182a');
+    f(ox,    oy+25, 16,  7, '#1e1a2c');
+    f(ox+17, oy+23, 15,  9, '#201c30');
+    f(ox+14, oy,     1, 12, '#0e0c18');
+    f(ox,    oy+12, 14,  1, '#0e0c18');
+    f(ox+10, oy+13,  1, 11, '#0e0c18');
+    // Spore dots
+    f(ox+3,  oy+4,  2,  2, '#6040a0');
+    f(ox+20, oy+6,  2,  2, '#5030a0');
+    f(ox+8,  oy+20, 2,  2, '#7050b0');
+    f(ox+24, oy+16, 2,  2, '#6040a0');
+    f(ox+12, oy+28, 2,  1, '#8060c0');
+  }
+
+  private drawBarracksFloor(ctx: CanvasRenderingContext2D, ox: number, oy: number): void {
+    const f = mk(ctx);
+    f(ox, oy, TILE, TILE, '#2a2824');
+    f(ox,    oy,    14, 12, '#2e2c28');
+    f(ox+15, oy,    17, 10, '#2a2824');
+    f(ox,    oy+13, 10, 11, '#302e28');
+    f(ox+11, oy+11, 15, 11, '#2c2a26');
+    f(ox,    oy+25, 16,  7, '#2a2824');
+    f(ox+17, oy+23, 15,  9, '#2e2c28');
+    f(ox+14, oy,     1, 12, '#1a1814');
+    f(ox,    oy+12, 14,  1, '#1a1814');
+    f(ox+10, oy+13,  1, 11, '#1a1814');
+    // Military-worn stone highlights
+    f(ox+1,  oy+1,  12,  1, '#3c3a34');
+    f(ox+16, oy+1,  14,  1, '#3c3a34');
+    f(ox+2,  oy+8,   8,  1, '#3a3830');
+    f(ox+18, oy+18, 10,  1, '#3a3830');
+  }
+
+  private drawFoundryFloor(ctx: CanvasRenderingContext2D, ox: number, oy: number): void {
+    const f = mk(ctx);
+    f(ox, oy, TILE, TILE, '#1c1410');
+    f(ox,    oy,    14, 12, '#201814');
+    f(ox+15, oy,    17, 10, '#1c1410');
+    f(ox,    oy+13, 10, 11, '#241a14');
+    f(ox+11, oy+11, 15, 11, '#1e1610');
+    f(ox,    oy+25, 16,  7, '#1c1410');
+    f(ox+17, oy+23, 15,  9, '#201814');
+    f(ox+14, oy,     1, 12, '#100c08');
+    f(ox,    oy+12, 14,  1, '#100c08');
+    f(ox+10, oy+13,  1, 11, '#100c08');
+    // Heat-glow cracks
+    f(ox+4,  oy+5,  3,  1, '#8a3010');
+    f(ox+20, oy+7,  4,  1, '#7a2808');
+    f(ox+8,  oy+22, 3,  1, '#8a3010');
+    f(ox+24, oy+18, 3,  1, '#7a2808');
+    f(ox+13, oy+27, 5,  1, '#aa3818');
+  }
+
+  private drawFrozenFloor(ctx: CanvasRenderingContext2D, ox: number, oy: number): void {
+    const f = mk(ctx);
+    f(ox, oy, TILE, TILE, '#1a2030');
+    f(ox,    oy,    14, 12, '#1e2438');
+    f(ox+15, oy,    17, 10, '#1a2030');
+    f(ox,    oy+13, 10, 11, '#20283c');
+    f(ox+11, oy+11, 15, 11, '#1c2234');
+    f(ox,    oy+25, 16,  7, '#1a2030');
+    f(ox+17, oy+23, 15,  9, '#1e2438');
+    f(ox+14, oy,     1, 12, '#101420');
+    f(ox,    oy+12, 14,  1, '#101420');
+    f(ox+10, oy+13,  1, 11, '#101420');
+    // Ice glint highlights
+    f(ox+2,  oy+3,  5,  1, '#4070a8');
+    f(ox+18, oy+5,  6,  1, '#3868a0');
+    f(ox+6,  oy+19, 5,  1, '#4070a8');
+    f(ox+22, oy+14, 6,  1, '#3868a0');
+    f(ox+10, oy+27, 8,  1, '#5080b8');
+  }
+
+  private drawCatacombFloor(ctx: CanvasRenderingContext2D, ox: number, oy: number): void {
+    const f = mk(ctx);
+    f(ox, oy, TILE, TILE, '#16141e');
+    f(ox,    oy,    14, 12, '#1a1824');
+    f(ox+15, oy,    17, 10, '#16141e');
+    f(ox,    oy+13, 10, 11, '#1c1a26');
+    f(ox+11, oy+11, 15, 11, '#181620');
+    f(ox,    oy+25, 16,  7, '#16141e');
+    f(ox+17, oy+23, 15,  9, '#1a1824');
+    f(ox+14, oy,     1, 12, '#0c0c14');
+    f(ox,    oy+12, 14,  1, '#0c0c14');
+    f(ox+10, oy+13,  1, 11, '#0c0c14');
+    // Faint rune marks
+    f(ox+4,  oy+6,  4,  1, '#302858');
+    f(ox+18, oy+9,  4,  1, '#302858');
+    f(ox+8,  oy+22, 4,  1, '#302858');
+    f(ox+23, oy+18, 3,  1, '#302858');
+  }
+
+  private drawVoidFloor(ctx: CanvasRenderingContext2D, ox: number, oy: number): void {
+    const f = mk(ctx);
+    f(ox, oy, TILE, TILE, '#0c0810');
+    f(ox,    oy,    14, 12, '#100c14');
+    f(ox+15, oy,    17, 10, '#0c0810');
+    f(ox,    oy+13, 10, 11, '#120e16');
+    f(ox+11, oy+11, 15, 11, '#0e0a12');
+    f(ox,    oy+25, 16,  7, '#0c0810');
+    f(ox+17, oy+23, 15,  9, '#100c14');
+    f(ox+14, oy,     1, 12, '#060408');
+    f(ox,    oy+12, 14,  1, '#060408');
+    f(ox+10, oy+13,  1, 11, '#060408');
+    // Void energy veins
+    f(ox+5,  oy+4,  3,  1, '#4020a0');
+    f(ox+20, oy+8,  4,  1, '#3818a0');
+    f(ox+7,  oy+20, 4,  1, '#4020a0');
+    f(ox+23, oy+15, 3,  1, '#5030b0');
+    f(ox+12, oy+26, 5,  1, '#4820a8');
+  }
+
+  private drawThroneFloor(ctx: CanvasRenderingContext2D, ox: number, oy: number): void {
+    const f = mk(ctx);
+    f(ox, oy, TILE, TILE, '#100e14');
+    f(ox,    oy,    14, 12, '#141218');
+    f(ox+15, oy,    17, 10, '#100e14');
+    f(ox,    oy+13, 10, 11, '#161418');
+    f(ox+11, oy+11, 15, 11, '#121016');
+    f(ox,    oy+25, 16,  7, '#100e14');
+    f(ox+17, oy+23, 15,  9, '#141218');
+    f(ox+14, oy,     1, 12, '#080608');
+    f(ox,    oy+12, 14,  1, '#080608');
+    f(ox+10, oy+13,  1, 11, '#080608');
+    // Gold trim lines
+    f(ox+2,  oy+3,  6,  1, '#5a4810');
+    f(ox+18, oy+5,  6,  1, '#5a4810');
+    f(ox+6,  oy+18, 6,  1, '#6a5818');
+    f(ox+22, oy+14, 6,  1, '#5a4810');
+    f(ox+10, oy+27, 8,  1, '#706020');
   }
 
   /**
@@ -433,16 +1002,18 @@ export class PreloadScene extends Phaser.Scene {
   }
 
   // ── Player textures ───────────────────────────────────────────────────────────
-  private buildPlayerTexture(clazz: ClassId): void {
+  private buildPlayerTexture(clazz: ClassId, race: RaceId = 'human'): void {
     const total = CLIPS.reduce((s, c) => s + c.count, 0);
-    const tex = this.textures.createCanvas(`player_${clazz}`, FRAME_W * total, FRAME_H);
-    if (!tex) throw new Error(`createCanvas(player_${clazz}) failed`);
+    const key = race === 'human' ? `player_${clazz}` : `player_${race}_${clazz}`;
+    const tex = this.textures.createCanvas(key, FRAME_W * total, FRAME_H);
+    if (!tex) throw new Error(`createCanvas(${key}) failed`);
     const ctx = tex.getContext();
+    const rp = RACE_PALETTES[race];
 
     let fx = 0;
     for (const clip of CLIPS) {
       for (let i = 0; i < clip.count; i++) {
-        this.drawPlayerFrame(ctx, fx, clip.name, i, clazz);
+        this.drawPlayerFrame(ctx, fx, clip.name, i, clazz, rp);
         tex.add(`${clip.name}_${i}`, 0, fx, 0, FRAME_W, FRAME_H);
         fx += FRAME_W;
       }
@@ -450,12 +1021,19 @@ export class PreloadScene extends Phaser.Scene {
     tex.refresh();
   }
 
-  private drawPlayerFrame(ctx: CanvasRenderingContext2D, fx: number, clip: ClipName, frame: number, clazz: ClassId): void {
-    const dir    = clip.split('_')[1] as 'down' | 'up' | 'side';
-    const isWalk = clip.startsWith('walk');
+  private drawPlayerFrame(
+    ctx: CanvasRenderingContext2D, fx: number, clip: ClipName, frame: number,
+    clazz: ClassId, rp: RacePalette = RACE_PALETTES.human,
+  ): void {
+    const parts = clip.split('_');
+    const dirPart = parts.length >= 2 && ['down','up','side'].includes(parts[1]) ? parts[1] : 'down';
+    const dir    = dirPart as 'down' | 'up' | 'side';
+    const isWalk   = clip.startsWith('walk');
+    const isAttack = clip.startsWith('attack');
+    const isHurt   = clip === 'hurt';
+    const isDie    = clip === 'die';
     const bob    = isWalk && frame % 2 === 1 ? 1 : 0;
     const lp     = isWalk ? frame : 0;
-    // Left/right leg step alternation
     const ll = lp === 1 ? 12 : lp === 3 ? 8 : 10;
     const rl = lp === 1 ? 8  : lp === 3 ? 12 : 10;
 
@@ -463,13 +1041,48 @@ export class PreloadScene extends Phaser.Scene {
       ctx.fillStyle = c;
       ctx.fillRect(fx + x, y + bob, w, h);
     };
+    // Apply race skin/eye color substitution helper
+    const rs = (c: string): string => {
+      if (c === P.skin)    return rp.skin;
+      if (c === P.skin_dk) return rp.skin_dk;
+      if (c === P.pupil)   return rp.eye;
+      if (c === P.brown && !isAttack && !isHurt && !isDie) return rp.hair;
+      return c;
+    };
+    const rf = (x: number, y: number, w: number, h: number, c: string): void => f(x, y, w, h, rs(c));
 
-    switch (clazz) {
-      case 'swordman': this.drawSwordman(f, dir, ll, rl); break;
-      case 'archer':   this.drawArcher(f, dir, ll, rl);   break;
-      case 'tanker':   this.drawTanker(f, dir, ll, rl);   break;
-      case 'assassin': this.drawAssassin(f, dir, ll, rl); break;
-      case 'sage':     this.drawSage(f, dir, ll, rl);     break;
+    if (isAttack) {
+      switch (clazz) {
+        case 'swordman': this.drawSwordmanAttack(rf, dir, frame); break;
+        case 'archer':   this.drawArcherAttack(rf, dir, frame);   break;
+        case 'tanker':   this.drawTankerAttack(rf, dir, frame);   break;
+        case 'assassin': this.drawAssassinAttack(rf, dir, frame); break;
+        case 'sage':     this.drawSageAttack(rf, dir, frame);     break;
+      }
+    } else if (isHurt) {
+      switch (clazz) {
+        case 'swordman': this.drawSwordmanHurt(rf, frame); break;
+        case 'archer':   this.drawArcherHurt(rf, frame);   break;
+        case 'tanker':   this.drawTankerHurt(rf, frame);   break;
+        case 'assassin': this.drawAssassinHurt(rf, frame); break;
+        case 'sage':     this.drawSageHurt(rf, frame);     break;
+      }
+    } else if (isDie) {
+      switch (clazz) {
+        case 'swordman': this.drawSwordmanDie(rf, frame); break;
+        case 'archer':   this.drawArcherDie(rf, frame);   break;
+        case 'tanker':   this.drawTankerDie(rf, frame);   break;
+        case 'assassin': this.drawAssassinDie(rf, frame); break;
+        case 'sage':     this.drawSageDie(rf, frame);     break;
+      }
+    } else {
+      switch (clazz) {
+        case 'swordman': this.drawSwordman(rf, dir, ll, rl); break;
+        case 'archer':   this.drawArcher(rf, dir, ll, rl);   break;
+        case 'tanker':   this.drawTanker(rf, dir, ll, rl);   break;
+        case 'assassin': this.drawAssassin(rf, dir, ll, rl); break;
+        case 'sage':     this.drawSage(rf, dir, ll, rl);     break;
+      }
     }
   }
 
@@ -764,6 +1377,236 @@ export class PreloadScene extends Phaser.Scene {
     f(19, 35,  2,  2, '#1a1840');
   }
 
+  // ── Attack frames (phase 0=windup, 1=active/strike, 2=recovery) ──────────────
+
+  private drawSwordmanAttack(f: (x:number,y:number,w:number,h:number,c:string)=>void, dir: 'down'|'up'|'side', phase: number): void {
+    // Shared body
+    f(10, 8, 12, 7, P.metal_dk); f(12, 10, 8, 5, P.skin);
+    f(10, 17, 12, 10, P.metal_dk); f(13, 17, 6, 9, P.blue);
+    f(10, 27, 5, 10, P.metal_dk); f(17, 27, 5, 10, P.metal_dk);
+    f(11, 35, 3, 2, P.metal_sh); f(18, 35, 3, 2, P.metal_sh);
+    if (phase === 0) { // windup — sword raised above head
+      f(16, 1, 2, 10, P.metal); f(14, 2, 6, 2, P.metal_sh); // blade up
+      f(14, 11, 4, 2, P.gold);  // crossguard
+      if (dir !== 'up') { f(13, 12, 2, 1, P.pupil); f(17, 12, 2, 1, P.pupil); }
+    } else if (phase === 1) { // active/strike — sword fully extended
+      if (dir === 'side') {
+        f(22, 14, 10, 2, P.metal); f(22, 14, 10, 1, P.metal_hi); // extended blade
+        f(20, 15, 4, 2, P.gold);   // crossguard
+      } else {
+        f(14, 14, 4, 12, P.metal); f(14, 14, 4, 1, P.metal_hi);
+        f(12, 17, 8, 2, P.gold);   // crossguard wide
+      }
+      if (dir !== 'up') { f(12, 12, 2, 1, P.pupil); f(17, 12, 2, 1, P.pupil); }
+    } else { // recovery — sword returning to hip
+      f(22, 20, 1, 8, P.metal_sh);
+      f(20, 21, 5, 1, P.gold);
+      if (dir !== 'up') { f(13, 12, 2, 1, P.pupil); f(17, 12, 2, 1, P.pupil); }
+    }
+  }
+
+  private drawArcherAttack(f: (x:number,y:number,w:number,h:number,c:string)=>void, dir: 'down'|'up'|'side', phase: number): void {
+    f(11, 7, 10, 3, P.green_dk); f(12, 10, 8, 6, P.skin);
+    f(11, 16, 10, 10, P.leather);
+    f(11, 27, 4, 10, P.leather_dk); f(17, 27, 4, 10, P.leather_dk);
+    if (dir !== 'up') { f(14, 13, 2, 1, P.pupil); f(17, 13, 2, 1, P.pupil); }
+    if (phase === 0) { // draw bow — pulling string back
+      f(6,  8, 2, 22, P.brown); f(5, 8, 1, 22, P.brown_dk); // bow arc
+      f(22, 14, 6, 2, P.leather_dk);  // arm pulling back
+    } else if (phase === 1) { // release — arrow at full draw
+      f(6,  6, 2, 26, P.brown); f(5, 6, 1, 26, P.brown_dk);
+      f(8,  18, 18, 2, P.brown_dk); // arrow shaft
+      f(26, 18, 4, 2, P.metal);     // arrowhead
+      f(7,  17, 2, 4, P.green_dk);  // fletching
+    } else { // recovery — bow returned
+      f(22, 10, 2, 18, P.brown);
+      f(22, 10, 2, 1, P.gold_dk);
+    }
+  }
+
+  private drawTankerAttack(f: (x:number,y:number,w:number,h:number,c:string)=>void, dir: 'down'|'up'|'side', phase: number): void {
+    f(9, 6, 14, 10, P.metal_dk); f(9, 16, 14, 11, P.metal_dk);
+    f(9, 27, 6, 10, P.metal_sh); f(17, 27, 6, 10, P.metal_sh);
+    if (dir !== 'up') { f(15, 9, 2, 6, P.outline); f(11, 11, 10, 2, P.outline); }
+    if (phase === 0) { // mace raised
+      f(23, 4, 3, 18, P.metal);  // shaft
+      f(21, 2, 7, 5,  P.metal_dk); f(21, 2, 7, 1, P.metal); // mace head
+      if (dir === 'down') { f(4, 18, 7, 9, P.metal); f(5, 20, 5, 6, P.metal_dk); }
+    } else if (phase === 1) { // smashing down
+      f(22, 14, 3, 16, P.metal);
+      f(20, 12, 7, 5, P.metal_dk); f(20, 12, 7, 1, P.metal);
+      if (dir === 'down') { f(4, 14, 7, 9, P.metal); f(5, 15, 5, 6, P.metal_dk); }
+    } else { // recovery — raise shield back up
+      f(23, 10, 3, 18, P.metal_sh);
+      if (dir === 'down') { f(4, 18, 7, 9, P.metal); }
+    }
+  }
+
+  private drawAssassinAttack(f: (x:number,y:number,w:number,h:number,c:string)=>void, dir: 'down'|'up'|'side', phase: number): void {
+    f(12, 6, 8, 3, P.purple); f(12, 10, 8, 6, P.outline);
+    f(12, 17, 8, 9, P.dark_cl);
+    f(12, 27, 4, 10, P.dark_cl); f(17, 27, 4, 10, P.dark_cl);
+    if (dir !== 'up') { f(14, 12, 2, 2, P.amber); f(17, 12, 2, 2, P.amber); }
+    if (phase === 0) { // daggers cross/ready
+      f(10, 14, 1, 10, P.metal); f(10, 14, 4, 1, P.gold_dk);
+      f(22, 14, 1, 10, P.metal); f(20, 14, 4, 1, P.gold_dk);
+    } else if (phase === 1) { // lunging strike — daggers forward
+      f(6,  16, 8, 1, P.metal); f(6, 16, 1, 4, P.metal); f(5, 16, 4, 1, P.gold_dk);
+      f(18, 16, 8, 1, P.metal); f(25, 16, 1, 4, P.metal); f(23, 16, 4, 1, P.gold_dk);
+    } else { // recovery
+      f(10, 19, 1, 8, P.metal); f(9, 19, 4, 1, P.gold_dk);
+      f(22, 19, 1, 8, P.metal); f(21, 19, 4, 1, P.gold_dk);
+    }
+  }
+
+  private drawSageAttack(f: (x:number,y:number,w:number,h:number,c:string)=>void, dir: 'down'|'up'|'side', phase: number): void {
+    f(15, 2, 2, 4, '#1a1a4e'); f(11, 9, 10, 2, '#1a1a4e');
+    f(12, 11, 8, 6, P.skin);
+    f(11, 17, 10, 10, '#3a3060');
+    f(11, 27, 10, 10, '#2a2050');
+    if (dir !== 'up') { f(13, 14, 2, 1, P.pupil); f(17, 14, 2, 1, P.pupil); }
+    if (phase === 0) { // staff raised, orb charging
+      f(16, 3, 2, 22, P.brown);
+      f(14, 1, 6, 5, '#4455dd'); f(13, 2, 8, 3, '#6677ff'); f(15, 2, 4, 2, '#99aaff');
+    } else if (phase === 1) { // orb released — energy burst
+      f(16, 3, 2, 18, P.brown);
+      if (dir === 'side') {
+        f(18, 10, 8, 6, '#3344cc'); f(18, 10, 8, 1, '#8899ff');
+        f(20, 12, 4, 2, '#ffffff');
+      } else {
+        f(11, 2, 10, 8, '#3344cc'); f(11, 2, 10, 1, '#8899ff');
+        f(13, 4, 6, 4, '#ffffff');
+      }
+    } else { // recovery
+      f(16, 6, 2, 18, P.brown);
+      f(15, 5, 4, 4, '#3344cc'); f(15, 5, 4, 1, '#6677ff');
+    }
+  }
+
+  // ── Hurt frames (2 frames: stagger, recovery) ─────────────────────────────────
+
+  private drawSwordmanHurt(f: (x:number,y:number,w:number,h:number,c:string)=>void, frame: number): void {
+    const off = frame === 0 ? 2 : 0; // stagger offset
+    f(10+off, 8,  12, 7, P.metal_dk); f(12+off, 10, 8, 5, P.skin);
+    f(9+off, 17, 12, 10, P.metal_dk);
+    f(9+off, 27, 5, 10, P.metal_dk); f(17+off, 27, 5, 10, P.metal_dk);
+    if (frame === 0) { f(12+off, 12, 2, 1, P.pupil); f(16+off, 12, 2, 1, P.pupil); } // pained eyes
+  }
+
+  private drawArcherHurt(f: (x:number,y:number,w:number,h:number,c:string)=>void, frame: number): void {
+    const off = frame === 0 ? 2 : 0;
+    f(11+off, 7, 10, 3, P.green_dk); f(12+off, 10, 8, 6, P.skin);
+    f(10+off, 16, 10, 10, P.leather);
+    f(10+off, 27, 4, 10, P.leather_dk); f(17+off, 27, 4, 10, P.leather_dk);
+    if (frame === 0) { f(13+off, 13, 2, 1, P.pupil); f(17+off, 13, 2, 1, P.pupil); }
+  }
+
+  private drawTankerHurt(f: (x:number,y:number,w:number,h:number,c:string)=>void, frame: number): void {
+    const off = frame === 0 ? 2 : 0;
+    f(9+off, 6, 14, 10, P.metal_dk); f(8+off, 17, 16, 11, P.metal_dk);
+    f(9+off, 27, 6, 10, P.metal_sh); f(17+off, 27, 6, 10, P.metal_sh);
+    if (frame === 0) { f(16+off, 9, 2, 6, P.outline); } // visor
+  }
+
+  private drawAssassinHurt(f: (x:number,y:number,w:number,h:number,c:string)=>void, frame: number): void {
+    const off = frame === 0 ? 2 : 0;
+    f(12+off, 6, 8, 3, P.purple); f(11+off, 10, 10, 6, P.outline);
+    f(11+off, 17, 8, 9, P.dark_cl);
+    f(11+off, 27, 4, 10, P.dark_cl); f(17+off, 27, 4, 10, P.dark_cl);
+    if (frame === 0) { f(14+off, 12, 2, 2, '#ff6030'); f(17+off, 12, 2, 2, '#ff6030'); } // hurt eyes
+  }
+
+  private drawSageHurt(f: (x:number,y:number,w:number,h:number,c:string)=>void, frame: number): void {
+    const off = frame === 0 ? 2 : 0;
+    f(15+off, 2, 2, 4, '#1a1a4e'); f(11+off, 9, 10, 2, '#1a1a4e');
+    f(12+off, 11, 8, 6, P.skin);
+    f(10+off, 17, 10, 10, '#3a3060');
+    f(11+off, 27, 10, 10, '#2a2050');
+    if (frame === 0) { f(13+off, 14, 2, 1, '#ff4444'); f(17+off, 14, 2, 1, '#ff4444'); }
+  }
+
+  // ── Die frames (4 frames: stagger → kneel → collapse → fallen) ───────────────
+
+  private drawSwordmanDie(f: (x:number,y:number,w:number,h:number,c:string)=>void, frame: number): void {
+    if (frame === 0) { // staggering back
+      f(12, 12, 8, 5, P.skin); f(10, 20, 12, 9, P.metal_dk);
+      f(11, 29, 5, 9, P.metal_dk); f(17, 27, 5, 11, P.metal_dk);
+    } else if (frame === 1) { // kneeling
+      f(12, 15, 8, 5, P.skin); f(10, 22, 12, 8, P.metal_dk);
+      f(9, 30, 5, 8, P.metal_dk); f(17, 32, 5, 6, P.metal_dk);
+    } else if (frame === 2) { // falling sideways
+      f(8, 22, 8, 5, P.skin); f(5, 27, 18, 8, P.metal_dk);
+      f(3, 34, 8, 5, P.metal_dk); f(18, 32, 8, 5, P.metal_dk);
+    } else { // fully fallen
+      f(6, 30, 8, 4, P.skin); f(3, 34, 22, 6, P.metal_dk);
+      f(2, 38, 6, 4, P.metal_sh); f(20, 36, 6, 4, P.metal_sh);
+    }
+  }
+
+  private drawArcherDie(f: (x:number,y:number,w:number,h:number,c:string)=>void, frame: number): void {
+    if (frame === 0) {
+      f(12, 11, 8, 6, P.skin); f(10, 20, 10, 9, P.leather);
+      f(11, 29, 4, 9, P.leather_dk); f(17, 27, 4, 11, P.leather_dk);
+    } else if (frame === 1) {
+      f(12, 16, 8, 5, P.skin); f(10, 23, 10, 7, P.leather);
+      f(9, 30, 4, 8, P.leather_dk); f(17, 32, 4, 6, P.leather_dk);
+    } else if (frame === 2) {
+      f(8, 24, 8, 4, P.skin); f(5, 28, 18, 7, P.leather);
+      f(3, 34, 8, 4, P.leather_dk); f(18, 32, 8, 4, P.leather_dk);
+    } else {
+      f(6, 32, 8, 3, P.skin); f(3, 35, 22, 5, P.leather);
+      f(2, 38, 6, 3, P.leather_dk); f(20, 37, 6, 3, P.leather_dk);
+    }
+  }
+
+  private drawTankerDie(f: (x:number,y:number,w:number,h:number,c:string)=>void, frame: number): void {
+    if (frame === 0) {
+      f(9, 7, 14, 10, P.metal_dk); f(8, 19, 16, 10, P.metal_dk);
+      f(9, 29, 6, 9, P.metal_sh);  f(17, 27, 6, 11, P.metal_sh);
+    } else if (frame === 1) {
+      f(9, 11, 14, 9, P.metal_dk); f(8, 22, 16, 9, P.metal_dk);
+      f(8, 30, 6, 8, P.metal_sh);  f(17, 33, 6, 5, P.metal_sh);
+    } else if (frame === 2) {
+      f(6, 24, 14, 8, P.metal_dk); f(4, 30, 20, 8, P.metal_dk);
+      f(3, 35, 8, 5, P.metal_sh);  f(18, 34, 8, 5, P.metal_sh);
+    } else {
+      f(5, 34, 22, 6, P.metal_dk); f(3, 38, 6, 4, P.metal_sh);
+      f(20, 37, 6, 4, P.metal_sh);
+    }
+  }
+
+  private drawAssassinDie(f: (x:number,y:number,w:number,h:number,c:string)=>void, frame: number): void {
+    if (frame === 0) {
+      f(12, 7, 8, 3, P.purple); f(12, 11, 8, 5, P.outline);
+      f(12, 19, 8, 8, P.dark_cl); f(12, 27, 4, 9, P.dark_cl); f(17, 27, 4, 9, P.dark_cl);
+    } else if (frame === 1) {
+      f(12, 10, 8, 4, P.outline); f(12, 21, 8, 8, P.dark_cl);
+      f(11, 29, 4, 9, P.dark_cl); f(17, 32, 4, 6, P.dark_cl);
+    } else if (frame === 2) {
+      f(9, 22, 8, 4, P.outline); f(6, 27, 18, 8, P.dark_cl);
+      f(3, 33, 8, 4, P.dark_cl); f(18, 32, 8, 4, P.dark_cl);
+    } else {
+      f(7, 33, 8, 3, P.outline); f(4, 36, 22, 5, P.dark_cl);
+      f(2, 39, 5, 3, P.outline); f(20, 38, 5, 3, P.outline);
+    }
+  }
+
+  private drawSageDie(f: (x:number,y:number,w:number,h:number,c:string)=>void, frame: number): void {
+    if (frame === 0) {
+      f(15, 3, 2, 3, '#1a1a4e'); f(12, 11, 8, 6, P.skin);
+      f(10, 19, 10, 9, '#3a3060'); f(11, 27, 10, 9, '#2a2050');
+    } else if (frame === 1) {
+      f(12, 15, 8, 5, P.skin); f(10, 22, 10, 7, '#3a3060');
+      f(11, 29, 10, 9, '#2a2050');
+    } else if (frame === 2) {
+      f(8, 23, 8, 4, P.skin); f(5, 28, 18, 8, '#3a3060');
+      f(3, 34, 8, 5, '#2a2050'); f(18, 32, 8, 5, '#2a2050');
+    } else {
+      f(6, 33, 8, 3, P.skin); f(3, 36, 22, 5, '#3a3060');
+      f(2, 39, 5, 3, '#2a2050'); f(20, 38, 5, 3, '#2a2050');
+    }
+  }
+
   // ── Enemy textures ────────────────────────────────────────────────────────────
   private buildEnemyTexture(id: string): void {
     const tex = this.textures.createCanvas(`enemy_${id}`, FRAME_W * 4, FRAME_H);
@@ -803,6 +1646,42 @@ export class PreloadScene extends Phaser.Scene {
       case 'rock_crab':     this.drawRockCrab(f, isWalk, frame);      break;
       case 'stone_imp':     this.drawStoneImp(f, isWalk, frame);      break;
       case 'cave_drake':    this.drawCaveDrake(f, isWalk, frame);     break;
+      case 'cave_slime':    this.drawCaveSlime(f, isWalk, frame);     break;
+      case 'drowned':       this.drawDrowned(f, isWalk, frame);       break;
+      case 'reed_lurker':   this.drawReedLurker(f, isWalk, frame);    break;
+      case 'toad_caster':   this.drawToadCaster(f, isWalk, frame);    break;
+      // Floor 3
+      case 'spore_brute':   this.drawSporeBrute(f, isWalk, frame);    break;
+      case 'myconid':       this.drawMyconid(f, isWalk, frame);       break;
+      case 'fungal_spider': this.drawFungalSpider(f, isWalk, frame);  break;
+      // Floor 4
+      case 'skeleton_soldier':  this.drawSkeletonSoldier(f, isWalk, frame);  break;
+      case 'crossbow_wight':    this.drawCrossbowWight(f, isWalk, frame);    break;
+      case 'shield_revenant':   this.drawShieldRevenant(f, isWalk, frame);   break;
+      // Floor 5
+      case 'ember_hound':   this.drawEmberHound(f, isWalk, frame);    break;
+      case 'forge_golem':   this.drawForgeGolem(f, isWalk, frame);    break;
+      case 'cinder_mage':   this.drawCinderMage(f, isWalk, frame);    break;
+      // Floor 6
+      case 'frost_wolf':    this.drawFrostWolf(f, isWalk, frame);     break;
+      case 'ice_archer':    this.drawIceArcher(f, isWalk, frame);     break;
+      case 'glacial_knight':this.drawGlacialKnight(f, isWalk, frame); break;
+      // Floor 7
+      case 'wraith_shade':  this.drawWraithShade(f, isWalk, frame);   break;
+      case 'bone_colossus': this.drawBoneColossus(f, isWalk, frame);  break;
+      case 'cultist':       this.drawCultist(f, isWalk, frame);       break;
+      // Floor 8
+      case 'void_spawn':    this.drawVoidSpawn(f, isWalk, frame);     break;
+      case 'riftling':      this.drawRiftling(f, isWalk, frame);      break;
+      case 'maw':           this.drawMaw(f, isWalk, frame);           break;
+      // Floor 9
+      case 'fallen_knight':    this.drawFallenKnight(f, isWalk, frame);    break;
+      case 'arcane_sentinel':  this.drawArcaneSentinel(f, isWalk, frame);  break;
+      case 'echo_shade':       this.drawEchoShade(f, isWalk, frame);       break;
+      // Floor 10
+      case 'iron_guardian':    this.drawIronGuardian(f, isWalk, frame);    break;
+      case 'shadow_herald':    this.drawShadowHerald(f, isWalk, frame);    break;
+      case 'void_herald':      this.drawVoidHerald(f, isWalk, frame);      break;
     }
   }
 
@@ -1509,6 +2388,894 @@ export class PreloadScene extends Phaser.Scene {
     f(12, 9, 1, 1, '#ffcc00'); f(18, 9, 1, 1, '#ffcc00');
   }
 
+  // ── Floor 1 extra ─────────────────────────────────────────────────────────────
+
+  private drawCaveSlime(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const pulse = isWalk && frame % 2 === 1 ? 2 : 0;
+    // Blob body
+    f(6-pulse, 14, 20+pulse*2, 18, '#1a6a18');
+    f(4, 18, 24, 14, '#1a6a18');
+    f(5, 16, 22, 18, '#22801e');
+    f(7, 17, 18, 16, '#2a9024');
+    // Highlight
+    f(9, 15, 14, 4, '#3aaa30');
+    f(11, 14, 10, 2, '#4ec040');
+    // Nucleus
+    f(12, 22, 8, 8, '#40c038');
+    f(14, 24, 4, 4, '#80f070');
+    // Eyes (beady)
+    f(10, 20, 3, 2, '#f0f020');
+    f(19, 20, 3, 2, '#f0f020');
+    f(11, 20, 1, 1, '#302010');
+    f(20, 20, 1, 1, '#302010');
+    // Drips
+    f(8, 32, 3, 4+pulse, '#1a6a18');
+    f(21, 31, 3, 5+pulse, '#1a6a18');
+  }
+
+  // ── Floor 2 extras ────────────────────────────────────────────────────────────
+
+  private drawDrowned(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const lp = isWalk ? frame : 0;
+    const ll = lp === 2 ? 12 : lp === 0 ? 8 : 10;
+    const rl = lp === 2 ? 8  : lp === 0 ? 12 : 10;
+    // Waterlogged legs
+    f(11, 28, 4, ll, '#1a2838'); f(17, 28, 4, rl, '#1a2838');
+    f(10, 28+ll-2, 5, 3, '#142030'); f(17, 28+rl-2, 5, 3, '#142030');
+    // Bloated body
+    f(9, 16, 14, 13, '#1a2e40');
+    f(9, 16, 14, 1, '#2a4458');
+    f(9, 16, 1, 13, '#2a4458');
+    f(10, 17, 12, 11, '#20384e');
+    // Arms (waterlogged)
+    f(5, 17, 5, 2, '#1a2838'); f(3, 19, 4, 8, '#1a2838');
+    f(23, 17, 5, 2, '#1a2838'); f(25, 19, 4, 8, '#1a2838');
+    // Bloated head
+    f(10, 6, 12, 11, '#1a2e40');
+    f(11, 5, 10, 12, '#1a2e40');
+    f(11, 6, 10, 10, '#20384e');
+    // Glowing eyes (drowned)
+    f(12, 10, 3, 2, '#00aaff');
+    f(17, 10, 3, 2, '#00aaff');
+    f(13, 10, 1, 1, '#80ddff');
+    f(18, 10, 1, 1, '#80ddff');
+    // Algae patches
+    f(11, 18, 3, 2, '#1a5020');
+    f(18, 22, 3, 2, '#1a5020');
+  }
+
+  private drawReedLurker(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const lp = isWalk ? frame : 0;
+    const ll = lp === 2 ? 11 : lp === 0 ? 8 : 9;
+    const rl = lp === 2 ? 8  : lp === 0 ? 11 : 9;
+    f(12, 28, 4, ll, '#2a4018'); f(17, 28, 4, rl, '#2a4018');
+    f(11, 28+ll-2, 5, 3, '#223418'); f(17, 28+rl-2, 5, 3, '#223418');
+    // Camouflaged body
+    f(10, 17, 12, 12, '#2a4018');
+    f(10, 17, 12, 1, '#3a5020');
+    f(10, 17, 1, 12, '#3a5020');
+    f(11, 18, 10, 10, '#324818');
+    // Reed arms
+    f(5, 17, 6, 2, '#2a4018'); f(3, 19, 4, 8, '#2a4018');
+    f(23, 17, 6, 2, '#2a4018'); f(25, 19, 4, 8, '#2a4018');
+    // Head with reeds protruding
+    f(11, 6, 10, 12, '#2a4018');
+    f(12, 5, 8, 12, '#324818');
+    // Reed stalks on head
+    f(12, 1, 2, 8, '#3a5820'); f(17, 0, 2, 9, '#3a5820'); f(14, 2, 2, 7, '#4a6828');
+    // Eyes (amber)
+    f(12, 12, 3, 2, '#c08020');
+    f(17, 12, 3, 2, '#c08020');
+  }
+
+  private drawToadCaster(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const squat = isWalk && frame % 2 === 1 ? 1 : 0;
+    // Squat legs
+    f(7, 30-squat, 6, 8+squat, '#2a5028');
+    f(19, 30-squat, 6, 8+squat, '#2a5028');
+    f(5, 32+squat, 8, 3, '#1e4020'); f(19, 32+squat, 8, 3, '#1e4020');
+    // Fat body
+    f(9, 17, 14, 15, '#2a5028');
+    f(9, 17, 14, 1, '#3a6038');
+    f(10, 18, 12, 13, '#3a6038');
+    f(10, 22, 12, 8, '#4a7848'); // lighter belly
+    // Wide arms holding staff
+    f(6, 17, 5, 2, '#2a5028'); f(4, 19, 4, 7, '#2a5028');
+    f(23, 17, 5, 2, '#2a5028'); f(25, 19, 4, 7, '#2a5028');
+    // Magic orb (right hand)
+    f(23, 15, 6, 6, '#4060dd');
+    f(24, 16, 4, 4, '#8090ff');
+    f(25, 17, 2, 2, '#ffffff');
+    // Big toad head
+    f(9, 7, 14, 12, '#2a5028');
+    f(10, 6, 12, 13, '#2a5028');
+    f(10, 7, 12, 10, '#3a6038');
+    // Protruding eyes
+    f(9, 6, 5, 5, '#3a6038'); f(18, 6, 5, 5, '#3a6038');
+    f(10, 6, 3, 3, '#c8c020'); f(19, 6, 3, 3, '#c8c020');
+    f(11, 6, 1, 1, '#2a2020'); f(20, 6, 1, 1, '#2a2020');
+    // Wide grin
+    f(10, 16, 12, 2, '#1a3818');
+    f(11, 16, 2, 1, '#c8c890'); f(14, 16, 2, 1, '#c8c890'); f(17, 16, 2, 1, '#c8c890');
+  }
+
+  // ── Floor 3 — Fungal ──────────────────────────────────────────────────────────
+
+  private drawSporeBrute(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const lp = isWalk ? frame : 0;
+    const sh = lp === 2 ? 1 : lp === 0 ? -1 : 0;
+    // Big pillar legs
+    f(8, 27, 7, 12+sh, '#4a2a38'); f(17, 27, 7, 12-sh, '#4a2a38');
+    f(7, 27, 7, 1, '#5a3848'); f(17, 27, 7, 1, '#5a3848');
+    // Hulking body
+    f(7, 14, 18, 14, '#4a2a38');
+    f(7, 14, 18, 1, '#5a3848');
+    f(7, 14, 1, 14, '#5a3848');
+    f(8, 15, 16, 12, '#523040');
+    // Mushroom caps growing on shoulders
+    f(3, 11, 8, 5, '#8a2870'); f(3, 11, 8, 1, '#b03090'); // left cap
+    f(21, 11, 8, 5, '#8a2870'); f(21, 11, 8, 1, '#b03090'); // right cap
+    // Big arms with spore clubs
+    f(3, 14, 5, 2, '#4a2a38'); f(1, 16, 5, 9, '#4a2a38');
+    f(24, 14, 5, 2, '#4a2a38'); f(26, 16, 5, 9, '#4a2a38');
+    // Head with mushroom crown
+    f(9, 4, 14, 11, '#4a2a38');
+    f(10, 3, 12, 12, '#4a2a38');
+    f(10, 4, 12, 10, '#523040');
+    f(6, 2, 20, 5, '#8a2870'); f(6, 2, 20, 1, '#c040a0'); // crown cap
+    // Eyes (spore-glow)
+    f(12, 8, 3, 3, '#d040a0');
+    f(17, 8, 3, 3, '#d040a0');
+    f(13, 9, 1, 1, '#ffa0e0');
+    f(18, 9, 1, 1, '#ffa0e0');
+  }
+
+  private drawMyconid(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const bob = isWalk && frame % 2 === 1 ? 1 : 0;
+    const lp = isWalk ? frame : 0;
+    const ll = lp === 2 ? 9 : lp === 0 ? 6 : 7;
+    const rl = lp === 2 ? 6 : lp === 0 ? 9 : 7;
+    // Small stumpy legs
+    f(13, 28, 3, ll, '#4a3030'); f(17, 28, 3, rl, '#4a3030');
+    f(12, 28+ll-1, 4, 3, '#3a2828'); f(16, 28+rl-1, 4, 3, '#3a2828');
+    // Round body
+    f(10-bob, 17, 12+bob*2, 12, '#6a2858');
+    f(9, 18, 14, 10, '#7a3068');
+    f(10, 19, 12, 8, '#8a3878');
+    // Stubby arms
+    f(6, 19, 5, 2, '#6a2858'); f(5, 21, 4, 5, '#6a2858');
+    f(21, 19, 5, 2, '#6a2858'); f(23, 21, 4, 5, '#6a2858');
+    // Large mushroom cap head
+    f(6, 7, 20, 12, '#9a3080');
+    f(4, 10, 24, 9, '#9a3080');
+    f(5, 8, 22, 11, '#b04098');
+    f(7, 7, 18, 10, '#c050a8');
+    f(9, 7, 14, 7, '#d060b8');
+    // Cap gills + face accents
+    f(7, 18, 2, 1, '#c040a0'); f(12, 17, 2, 1, '#c040a0'); f(18, 18, 2, 1, '#c040a0');
+    // Face under cap
+    f(11, 14, 10, 6, '#7a3068');
+    f(13, 16, 2, 2, '#e0a0e0');
+    f(17, 16, 2, 2, '#e0a0e0');
+  }
+
+  private drawFungalSpider(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const legExt = isWalk && frame % 2 === 1 ? 2 : 0;
+    // Spider legs (purple-tinted)
+    f(4,  14+legExt, 8, 2, '#5a2858');
+    f(3,  18,        7, 2, '#5a2858');
+    f(4,  22-legExt, 7, 2, '#5a2858');
+    f(5,  26,        6, 2, '#5a2858');
+    f(20, 14+legExt, 8, 2, '#5a2858');
+    f(21, 18,        7, 2, '#5a2858');
+    f(21, 22-legExt, 7, 2, '#5a2858');
+    f(21, 26,        6, 2, '#5a2858');
+    // Abdomen with mushroom growths
+    f(9, 18, 14, 12, '#4a2040');
+    f(8, 20, 16, 8, '#4a2040');
+    f(10, 19, 12, 10, '#5a2850');
+    // Mushroom caps on abdomen
+    f(10, 15, 5, 4, '#9a3080'); f(10, 15, 5, 1, '#c050a8');
+    f(17, 16, 5, 3, '#8a2870'); f(17, 16, 5, 1, '#b03090');
+    // Cephalothorax
+    f(11, 13, 10, 6, '#4a2040');
+    f(12, 12, 8, 7, '#5a2850');
+    // Eight eyes (spore-colored)
+    f(12, 14, 2, 2, '#d040a0'); f(15, 14, 2, 2, '#d040a0');
+    f(18, 14, 2, 2, '#d040a0'); f(21, 14, 2, 2, '#d040a0');
+    // Fangs
+    f(13, 19, 2, 2, '#c8a0c0'); f(17, 19, 2, 2, '#c8a0c0');
+  }
+
+  // ── Floor 4 — Barracks ────────────────────────────────────────────────────────
+
+  private drawSkeletonSoldier(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const lp = isWalk ? frame : 0;
+    const ll = lp === 2 ? 12 : lp === 0 ? 8 : 10;
+    const rl = lp === 2 ? 8  : lp === 0 ? 12 : 10;
+    f(12, 28, 4, ll, '#9a9080'); f(17, 28, 4, rl, '#9a9080');
+    f(11, 28+ll-2, 5, 3, '#c8c0a0'); f(17, 28+rl-2, 5, 3, '#c8c0a0');
+    // Armored body
+    f(10, 16, 12, 13, '#6a6878');
+    f(10, 16, 12, 1, '#9a98b0');
+    f(10, 16, 1, 13, '#9a98b0');
+    f(11, 17, 10, 11, '#747282');
+    // Arms
+    f(5, 17, 6, 2, '#6a6878'); f(3, 19, 5, 9, '#9a9080');
+    f(23, 17, 6, 2, '#6a6878'); f(24, 19, 5, 9, '#9a9080');
+    // Sword (right)
+    f(25, 11, 2, 14, '#c0c8d8'); f(24, 12, 4, 2, '#9a98b0'); f(25, 10, 2, 2, '#6a6878');
+    // Shield (left)
+    f(3, 17, 6, 8, '#6a6878'); f(3, 17, 6, 1, '#9a98b0'); f(4, 19, 4, 5, '#c0901c');
+    // Skull head
+    f(11, 6, 10, 10, '#c8c0a0');
+    f(12, 5, 8, 11, '#c8c0a0');
+    f(12, 6, 8, 9, '#d8d0b0');
+    // Helmet
+    f(10, 4, 12, 4, '#6a6878'); f(10, 4, 12, 1, '#9a98b0'); f(12, 4, 8, 4, '#747282');
+    f(10, 7, 12, 1, '#9a98b0'); // visor gap
+    // Eye sockets
+    f(12, 9, 3, 3, '#202028'); f(17, 9, 3, 3, '#202028');
+  }
+
+  private drawCrossbowWight(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const lp = isWalk ? frame : 0;
+    const ll = lp === 2 ? 11 : lp === 0 ? 8 : 9;
+    const rl = lp === 2 ? 8  : lp === 0 ? 11 : 9;
+    f(12, 28, 4, ll, '#8a8070'); f(17, 28, 4, rl, '#8a8070');
+    f(11, 28+ll-2, 5, 2, '#b0a890'); f(17, 28+rl-2, 5, 2, '#b0a890');
+    // Bone/tattered body
+    f(10, 16, 12, 13, '#3e3c4c');
+    f(10, 16, 12, 1, '#5e5c6e');
+    f(11, 17, 10, 11, '#484658');
+    // Arms holding crossbow
+    f(5, 17, 6, 2, '#3e3c4c'); f(2, 19, 4, 8, '#8a8070');
+    f(23, 17, 6, 2, '#3e3c4c'); f(25, 19, 4, 8, '#8a8070');
+    // Crossbow (both hands)
+    f(4, 20, 14, 4, '#4a3818'); f(4, 21, 14, 1, '#6a5030'); // stock
+    f(2, 18, 18, 3, '#6a5030'); f(10, 16, 2, 7, '#4a3818'); // bow arms
+    f(2, 22, 2, 2, '#c8c0a0'); // bolt tip
+    // Skull head
+    f(11, 6, 10, 10, '#b0a890');
+    f(12, 5, 8, 11, '#b0a890');
+    f(12, 6, 8, 9, '#c0b8a0');
+    f(12, 9, 3, 3, '#202028'); f(17, 9, 3, 3, '#202028');
+    f(13, 14, 6, 2, '#202028'); // jaw gap
+  }
+
+  private drawShieldRevenant(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const lp = isWalk ? frame : 0;
+    const sh = lp === 2 ? 1 : lp === 0 ? -1 : 0;
+    f(9, 28, 6, 11+sh, '#6a6878'); f(17, 28, 6, 11-sh, '#6a6878');
+    f(8, 28, 6, 1, '#9a98b0'); f(17, 28, 6, 1, '#9a98b0');
+    // Heavy armored body
+    f(8, 14, 16, 15, '#6a6878');
+    f(8, 14, 16, 1, '#9a98b0');
+    f(8, 14, 1, 15, '#9a98b0');
+    f(9, 15, 14, 13, '#747282');
+    // Pauldrons
+    f(5, 14, 4, 5, '#6a6878'); f(5, 14, 4, 1, '#9a98b0');
+    f(23, 14, 4, 5, '#6a6878'); f(23, 14, 4, 1, '#9a98b0');
+    // Huge shield (left)
+    f(1, 12, 8, 16, '#4a4858'); f(1, 12, 8, 1, '#6a6878'); f(1, 12, 1, 16, '#6a6878');
+    f(2, 14, 6, 12, '#5a5868');
+    f(3, 16, 4, 2, '#c0901c'); // heraldry cross
+    f(4, 14, 2, 8, '#c0901c');
+    // Sword raised (right)
+    f(25, 6, 2, 22, '#c0c8d8'); f(25, 6, 2, 1, '#e0e8f0');
+    f(23, 8, 6, 2, '#9a98b0'); // crossguard
+    // Head — full helmet
+    f(9, 4, 14, 11, '#6a6878');
+    f(10, 3, 12, 12, '#6a6878');
+    f(10, 4, 12, 10, '#747282');
+    // Visor slot (glowing red eyes through)
+    f(11, 9, 10, 2, '#1a1828');
+    f(12, 9, 3, 2, '#cc2020'); f(17, 9, 3, 2, '#cc2020');
+  }
+
+  // ── Floor 5 — Foundry ────────────────────────────────────────────────────────
+
+  private drawEmberHound(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const lp = isWalk ? frame : 0;
+    const fl = lp === 2 ? 10 : lp === 0 ? 7 : 9; // front legs
+    const bl = lp === 2 ? 7  : lp === 0 ? 10 : 9; // back legs
+    // Four legs
+    f(6, 28, 4, fl, '#5a1800'); f(10, 28, 4, bl, '#5a1800');
+    f(18, 28, 4, fl, '#5a1800'); f(22, 28, 4, bl, '#5a1800');
+    // Body
+    f(7, 18, 18, 12, '#6a2000');
+    f(6, 20, 20, 10, '#6a2000');
+    f(7, 19, 18, 10, '#7a2800');
+    // Molten core/belly
+    f(10, 22, 12, 6, '#cc4400');
+    f(11, 23, 10, 4, '#ff6600');
+    f(13, 24, 6, 2, '#ffcc00');
+    // Neck and head
+    f(11, 10, 10, 10, '#6a2000');
+    f(12, 9, 8, 11, '#6a2000');
+    f(12, 10, 8, 9, '#7a2800');
+    // Flaming mane
+    f(9, 6, 3, 8, '#cc4400'); f(9, 6, 3, 1, '#ffaa00');
+    f(12, 4, 4, 8, '#ee5500'); f(12, 4, 4, 1, '#ffcc00');
+    f(17, 5, 3, 8, '#cc4400'); f(17, 5, 3, 1, '#ffaa00');
+    // Snout
+    f(12, 16, 10, 4, '#5a1800'); f(13, 17, 8, 2, '#7a2800');
+    f(14, 19, 3, 2, '#c8a870'); f(18, 19, 3, 2, '#c8a870'); // fangs
+    // Ember eyes
+    f(12, 12, 3, 2, '#ffaa00');
+    f(17, 12, 3, 2, '#ffaa00');
+    f(13, 12, 1, 1, '#ffffff');
+    f(18, 12, 1, 1, '#ffffff');
+    // Tail (fire-tipped)
+    f(22, 20, 5, 2, '#5a1800'); f(26, 18, 3, 4, '#5a1800');
+    f(27, 15, 2, 4, '#cc4400'); f(28, 14, 2, 3, '#ff8800');
+  }
+
+  private drawForgeGolem(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const lp = isWalk ? frame : 0;
+    const sh = lp === 2 ? 1 : lp === 0 ? -1 : 0;
+    // Massive metal legs
+    f(7, 27, 8, 12+sh, '#3a3028'); f(17, 27, 8, 12-sh, '#3a3028');
+    f(6, 27, 8, 1, '#5a5048'); f(17, 27, 8, 1, '#5a5048');
+    // Iron body
+    f(7, 14, 18, 14, '#3a3028');
+    f(7, 14, 18, 1, '#5a5048');
+    f(7, 14, 1, 14, '#5a5048');
+    f(8, 15, 16, 12, '#444038');
+    // Molten chest seam
+    f(11, 17, 10, 8, '#2a1800');
+    f(12, 18, 8, 6, '#cc3000');
+    f(13, 19, 6, 4, '#ff6600');
+    f(14, 20, 4, 2, '#ffcc00');
+    // Huge forge arms
+    f(1, 13, 7, 3, '#3a3028'); f(0, 16, 6, 12, '#3a3028');
+    f(24, 13, 7, 3, '#3a3028'); f(26, 16, 6, 12, '#3a3028');
+    f(0, 27, 7, 4, '#5a5048'); // fists
+    f(25, 27, 7, 4, '#5a5048');
+    // Head — industrial
+    f(8, 4, 16, 11, '#3a3028');
+    f(9, 3, 14, 12, '#3a3028');
+    f(9, 4, 14, 10, '#444038');
+    // Furnace eyes
+    f(10, 7, 5, 4, '#1a0c00'); f(17, 7, 5, 4, '#1a0c00');
+    f(11, 8, 3, 2, '#ff6600'); f(18, 8, 3, 2, '#ff6600');
+    f(12, 8, 1, 1, '#ffffff'); f(19, 8, 1, 1, '#ffffff');
+    // Exhaust pipes on shoulders
+    f(5, 12, 3, 4, '#3a3028'); f(5, 12, 3, 1, '#5a5048');
+    f(24, 12, 3, 4, '#3a3028'); f(24, 12, 3, 1, '#5a5048');
+  }
+
+  private drawCinderMage(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const lp = isWalk ? frame : 0;
+    const ll = lp === 2 ? 11 : lp === 0 ? 8 : 10;
+    const rl = lp === 2 ? 8  : lp === 0 ? 11 : 10;
+    f(12, 28, 4, ll, '#2a1008'); f(17, 28, 4, rl, '#2a1008');
+    f(11, 28+ll-2, 5, 2, '#3a1810'); f(17, 28+rl-2, 5, 2, '#3a1810');
+    // Ashen robes
+    f(10, 17, 12, 12, '#2a1008');
+    f(10, 17, 12, 1, '#4a2818');
+    f(10, 17, 1, 12, '#4a2818');
+    f(11, 18, 10, 10, '#3a1810');
+    // Ember robe accents
+    f(14, 19, 4, 1, '#cc4400');
+    f(15, 21, 2, 2, '#cc4400');
+    f(14, 23, 4, 1, '#cc4400');
+    // Flame arms
+    f(6, 17, 5, 2, '#2a1008'); f(4, 19, 4, 7, '#2a1008');
+    f(23, 17, 5, 2, '#2a1008'); f(25, 19, 4, 7, '#2a1008');
+    // Fire staff (left)
+    f(4, 8, 2, 18, '#3a2010');
+    f(2, 5, 6, 6, '#cc3000'); f(3, 4, 4, 4, '#ff6600');
+    f(4, 3, 2, 3, '#ffcc00'); f(4, 2, 2, 2, '#ffffff');
+    // Head in cinder cowl
+    f(11, 7, 10, 11, '#2a1008');
+    f(12, 6, 8, 12, '#2a1008');
+    f(12, 7, 8, 10, '#3a1810');
+    // Burning eyes
+    f(13, 11, 3, 2, '#ff6600');
+    f(17, 11, 3, 2, '#ff6600');
+    f(14, 11, 1, 1, '#ffff00');
+    f(18, 11, 1, 1, '#ffff00');
+    // Ember mask
+    f(12, 14, 8, 3, '#1a0808');
+    f(13, 14, 6, 1, '#cc3000');
+  }
+
+  // ── Floor 6 — Frozen ─────────────────────────────────────────────────────────
+
+  private drawFrostWolf(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const lp = isWalk ? frame : 0;
+    const fl = lp === 2 ? 10 : lp === 0 ? 7 : 9;
+    const bl = lp === 2 ? 7  : lp === 0 ? 10 : 9;
+    f(6, 28, 4, fl, '#2a3848'); f(10, 28, 4, bl, '#2a3848');
+    f(18, 28, 4, fl, '#2a3848'); f(22, 28, 4, bl, '#2a3848');
+    // Body
+    f(7, 18, 18, 12, '#3a4858');
+    f(6, 20, 20, 10, '#3a4858');
+    f(7, 19, 18, 10, '#4a5868');
+    // Ice fur highlights
+    f(8, 18, 16, 2, '#6080a8');
+    f(9, 16, 14, 3, '#7090b8');
+    f(10, 15, 12, 2, '#8aa0c8');
+    // Neck and head
+    f(11, 10, 10, 10, '#3a4858');
+    f(12, 9, 8, 11, '#4a5868');
+    // Ice-crystal ear spines
+    f(10, 6, 2, 5, '#90b8e0'); f(10, 6, 2, 1, '#c0d8f8');
+    f(20, 5, 2, 6, '#90b8e0'); f(20, 5, 2, 1, '#c0d8f8');
+    // Snout
+    f(12, 16, 10, 4, '#3a4858'); f(13, 17, 8, 2, '#4a5868');
+    f(14, 19, 3, 2, '#d0e8f8'); f(18, 19, 3, 2, '#d0e8f8');
+    // Icy blue eyes
+    f(12, 12, 3, 2, '#60c0e0');
+    f(17, 12, 3, 2, '#60c0e0');
+    f(13, 12, 1, 1, '#f0f8ff');
+    f(18, 12, 1, 1, '#f0f8ff');
+    // Tail
+    f(22, 20, 5, 2, '#3a4858'); f(26, 18, 3, 4, '#4a5868'); f(27, 16, 2, 3, '#90b8e0');
+  }
+
+  private drawIceArcher(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const lp = isWalk ? frame : 0;
+    const ll = lp === 2 ? 12 : lp === 0 ? 8 : 10;
+    const rl = lp === 2 ? 8  : lp === 0 ? 12 : 10;
+    f(12, 28, 4, ll, '#2a3848'); f(17, 28, 4, rl, '#2a3848');
+    f(11, 28+ll-2, 5, 2, '#4060a0'); f(17, 28+rl-2, 5, 2, '#4060a0');
+    // Ice-crystal armor body
+    f(10, 16, 12, 13, '#2a3848');
+    f(10, 16, 12, 1, '#5080b8');
+    f(10, 16, 1, 13, '#5080b8');
+    f(11, 17, 10, 11, '#344858');
+    // Ice shard shoulder pauldrons
+    f(7, 15, 4, 6, '#3050a0'); f(7, 15, 4, 1, '#8090d8');
+    f(21, 15, 4, 6, '#3050a0'); f(21, 15, 4, 1, '#8090d8');
+    // Arms drawing ice bow
+    f(5, 17, 6, 2, '#2a3848'); f(3, 19, 4, 8, '#344858');
+    f(23, 17, 6, 2, '#2a3848'); f(25, 19, 4, 8, '#344858');
+    // Ice bow + arrow
+    f(4, 10, 1, 18, '#80b0e0'); // bow limb
+    f(3, 12, 2, 14, '#a0d0f8');
+    f(3, 10, 14, 1, '#c0d8f8'); // ice string
+    f(3, 28, 2, 1, '#c0d8f8');
+    f(3, 18, 10, 2, '#a0d0f0'); // arrow
+    f(3, 18, 2, 2, '#e0f0ff'); // arrowhead
+    // Head in ice helm
+    f(11, 6, 10, 11, '#2a3848');
+    f(12, 5, 8, 12, '#2a3848');
+    f(12, 6, 8, 10, '#344858');
+    // Ice crown spikes
+    f(13, 3, 2, 4, '#90c0e0'); f(13, 3, 2, 1, '#c0e8ff');
+    f(17, 2, 2, 5, '#90c0e0'); f(17, 2, 2, 1, '#c0e8ff');
+    // Eyes
+    f(12, 10, 3, 2, '#40b0e0');
+    f(17, 10, 3, 2, '#40b0e0');
+    f(13, 10, 1, 1, '#f0f8ff');
+    f(18, 10, 1, 1, '#f0f8ff');
+  }
+
+  private drawGlacialKnight(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const lp = isWalk ? frame : 0;
+    const sh = lp === 2 ? 1 : lp === 0 ? -1 : 0;
+    f(9, 27, 6, 12+sh, '#1a2840'); f(17, 27, 6, 12-sh, '#1a2840');
+    f(8, 27, 6, 1, '#3060a0'); f(17, 27, 6, 1, '#3060a0');
+    // Massive ice-encrusted armor
+    f(7, 13, 18, 15, '#1a2840');
+    f(7, 13, 18, 1, '#3060a0');
+    f(7, 13, 1, 15, '#3060a0');
+    f(8, 14, 16, 13, '#253050');
+    // Ice shard plating
+    f(9, 15, 14, 11, '#2a3858');
+    f(10, 15, 12, 2, '#4080c0'); // chest ice shard
+    f(8, 19, 4, 4, '#3060a0'); f(20, 19, 4, 4, '#3060a0'); // shoulder ice
+    // Huge arms
+    f(3, 13, 5, 3, '#1a2840'); f(1, 16, 5, 12, '#1a2840');
+    f(24, 13, 5, 3, '#1a2840'); f(26, 16, 5, 12, '#1a2840');
+    // Ice maul (left arm)
+    f(0, 26, 8, 6, '#4080c0'); f(1, 25, 6, 2, '#60a0d8'); f(2, 24, 4, 2, '#80c0f0');
+    // Head — glacier helm
+    f(8, 3, 16, 11, '#1a2840');
+    f(9, 2, 14, 12, '#1a2840');
+    f(9, 3, 14, 10, '#253050');
+    // Ice crown
+    f(10, 0, 4, 4, '#4080c0'); f(10, 0, 4, 1, '#80c0f8');
+    f(15, 0, 4, 5, '#3070b0'); f(15, 0, 4, 1, '#70b0e8');
+    f(20, 1, 3, 3, '#4080c0'); f(20, 1, 3, 1, '#80c0f8');
+    // Visor slots (cold blue glow)
+    f(11, 8, 4, 3, '#1a1830');
+    f(17, 8, 4, 3, '#1a1830');
+    f(12, 9, 2, 1, '#4090e0'); f(18, 9, 2, 1, '#4090e0');
+  }
+
+  // ── Floor 7 — Catacombs ──────────────────────────────────────────────────────
+
+  private drawWraithShade(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const drift = isWalk && frame % 2 === 1 ? 2 : 0;
+    // More menacing wraith — larger and darker
+    f(11+drift, 28, 10, 10, '#100c20');
+    f(10, 26, 12, 8, '#160e28');
+    f(9, 24, 14, 6, '#1e1430');
+    f(9, 22, 14, 6, '#24183a');
+    f(8, 14, 16, 12, '#1c1430');
+    f(8, 14, 16, 1, '#2c2048');
+    f(8, 14, 1, 12, '#2c2048');
+    f(9, 15, 14, 10, '#221838');
+    // Wisp tentacles
+    f(3, 16, 5, 3, '#1c1430'); f(1, 19, 4, 8, '#160e28');
+    f(24, 16, 5, 3, '#1c1430'); f(27, 19, 4, 8, '#160e28');
+    // Head — double-shadowed
+    f(10, 5, 12, 10, '#140e24');
+    f(11, 4, 10, 11, '#1c1432');
+    f(11, 5, 10, 9, '#22183a');
+    // Bone frame visible through shadow
+    f(12, 7, 2, 4, '#403060'); f(18, 7, 2, 4, '#403060');
+    // Blazing red-violet eyes
+    f(11, 8, 4, 3, '#cc0044');
+    f(17, 8, 4, 3, '#cc0044');
+    f(12, 9, 2, 1, '#ff4080');
+    f(18, 9, 2, 1, '#ff4080');
+    f(12, 8, 1, 1, '#ffffff');
+    f(18, 8, 1, 1, '#ffffff');
+  }
+
+  private drawBoneColossus(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const lp = isWalk ? frame : 0;
+    const sh = lp === 2 ? 2 : lp === 0 ? -2 : 0;
+    // Titanic legs
+    f(7, 26, 8, 13+sh, '#c0b898'); f(17, 26, 8, 13-sh, '#c0b898');
+    f(6, 26, 8, 1, '#ddd8c0'); f(17, 26, 8, 1, '#ddd8c0');
+    // Massive ribcage
+    f(6, 13, 20, 14, '#b0a890');
+    f(6, 13, 20, 1, '#ccc4a8');
+    f(4, 14, 2, 3, '#b0a890'); f(26, 14, 2, 3, '#b0a890');
+    for (let i = 0; i < 5; i++) {
+      f(4, 15+i*2, 5, 2, '#c8c0a0'); f(23, 15+i*2, 5, 2, '#c8c0a0');
+    }
+    f(14, 13, 4, 14, '#a09880'); // spine
+    // Huge arms
+    f(1, 12, 6, 4, '#b0a890'); f(0, 16, 5, 12, '#b0a890');
+    f(25, 12, 6, 4, '#b0a890'); f(27, 16, 5, 12, '#b0a890');
+    f(0, 27, 6, 4, '#a09880'); f(26, 27, 6, 4, '#a09880');
+    // Giant skull
+    f(6, 2, 20, 12, '#c8c0a0');
+    f(7, 2, 18, 1, '#ddd8c0');
+    f(6, 2, 1, 12, '#ddd8c0');
+    f(8, 5, 7, 4, '#2a2430'); // left eye
+    f(17, 5, 7, 4, '#2a2430'); // right eye
+    f(13, 4, 6, 2, '#2a2430'); // nose
+    f(8, 11, 16, 2, '#2a2430'); // jaw
+    f(9, 12, 2, 2, '#c8c0a0'); f(13, 12, 2, 2, '#c8c0a0'); f(17, 12, 2, 2, '#c8c0a0'); f(21, 12, 2, 2, '#c8c0a0');
+  }
+
+  private drawCultist(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const lp = isWalk ? frame : 0;
+    const ll = lp === 2 ? 12 : lp === 0 ? 8 : 10;
+    const rl = lp === 2 ? 8  : lp === 0 ? 12 : 10;
+    f(12, 28, 4, ll, '#1e1228'); f(17, 28, 4, rl, '#1e1228');
+    f(11, 28+ll-2, 5, 2, '#2a1a38'); f(17, 28+rl-2, 5, 2, '#2a1a38');
+    // Dark ritual robe
+    f(10, 16, 12, 13, '#1e1228');
+    f(10, 16, 12, 1, '#3a2248');
+    f(10, 16, 1, 13, '#3a2248');
+    f(11, 17, 10, 11, '#261830');
+    // Robe rune markings
+    f(14, 20, 4, 1, '#8040c0');
+    f(15, 22, 2, 2, '#8040c0');
+    f(14, 24, 4, 1, '#8040c0');
+    // Long sleeve arms, one raised
+    f(6, 16, 5, 2, '#1e1228'); f(4, 18, 4, 7, '#1e1228');
+    f(23, 16, 5, 2, '#1e1228'); f(25, 18, 4, 7, '#1e1228');
+    // Sacrificial dagger (right hand)
+    f(26, 14, 2, 10, '#c0a870'); f(25, 14, 4, 2, '#8a7050'); f(26, 13, 2, 2, '#8a7050');
+    // Hooded head with ominous glow
+    f(10, 5, 12, 12, '#1e1228');
+    f(11, 4, 10, 13, '#1e1228');
+    f(11, 5, 10, 11, '#261830');
+    // Deep shadow face
+    f(12, 9, 8, 8, '#14101c');
+    f(13, 11, 3, 2, '#8040c0'); // glowing eyes
+    f(17, 11, 3, 2, '#8040c0');
+    f(14, 11, 1, 1, '#c080ff');
+    f(18, 11, 1, 1, '#c080ff');
+  }
+
+  // ── Floor 8 — Void ──────────────────────────────────────────────────────────
+
+  private drawVoidSpawn(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const pulse = isWalk && frame % 2 === 1 ? 1 : 0;
+    // Formless void creature
+    f(8-pulse, 16, 16+pulse*2, 20, '#0c0820');
+    f(5, 20, 22, 14, '#0c0820');
+    f(6, 18, 20, 18, '#100c28');
+    f(8, 17, 16, 18, '#180e30');
+    // Void tendrils
+    f(6, 30, 2, 8+pulse, '#0c0820');
+    f(11, 32, 2, 6, '#0c0820');
+    f(19, 31, 2, 7, '#0c0820');
+    f(24, 30, 2, 8+pulse, '#0c0820');
+    // Void energy core
+    f(11, 20, 10, 10, '#1a1040');
+    f(12, 21, 8, 8, '#2a1858');
+    f(13, 22, 6, 6, '#3a2070');
+    f(14, 23, 4, 4, '#5030a0');
+    f(15, 24, 2, 2, '#8050d0');
+    // Many eyes (void spawn)
+    f(9, 19, 2, 2, '#cc00ff');
+    f(14, 18, 2, 2, '#8800cc');
+    f(20, 19, 2, 2, '#cc00ff');
+    f(11, 24, 2, 2, '#aa00dd');
+    f(19, 25, 2, 2, '#cc00ff');
+  }
+
+  private drawRiftling(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const drift = isWalk && frame % 2 === 1 ? 1 : 0;
+    // Rift energy body
+    f(9+drift, 14, 14, 20, '#14083a');
+    f(8, 18, 16, 16, '#14083a');
+    f(9, 16, 14, 18, '#1e0e50');
+    f(10, 15, 12, 18, '#2a1468');
+    // Energy wings
+    f(3, 12, 7, 12, '#1a0a40');
+    f(2, 14, 5, 10, '#220e50');
+    f(23, 12, 7, 12, '#1a0a40');
+    f(25, 14, 5, 10, '#220e50');
+    // Rift cracks on body
+    f(14, 16, 1, 12, '#8040e0');
+    f(12, 20, 8, 1, '#8040e0');
+    f(12, 24, 4, 1, '#6030c0');
+    // Head
+    f(10, 5, 12, 10, '#14083a');
+    f(11, 4, 10, 11, '#1e0e50');
+    f(11, 5, 10, 9, '#2a1468');
+    // Rift eyes
+    f(12, 8, 3, 3, '#9040f0');
+    f(17, 8, 3, 3, '#9040f0');
+    f(13, 9, 1, 1, '#e0a0ff');
+    f(18, 9, 1, 1, '#e0a0ff');
+    // Void mouth
+    f(13, 12, 6, 2, '#08040a');
+    f(14, 12, 4, 1, '#6030c0');
+  }
+
+  private drawMaw(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const gape = isWalk && frame % 2 === 1 ? 2 : 0;
+    // Void beast — all teeth and darkness
+    f(5, 16, 22, 20, '#0e0820');
+    f(3, 20, 26, 16, '#0e0820');
+    f(4, 18, 24, 18, '#140c2a');
+    f(6, 17, 20, 18, '#1a1030');
+    // Void legs (thick stumps)
+    f(7, 34, 6, 8, '#0e0820'); f(19, 34, 6, 8, '#0e0820');
+    // THE MAW (enormous open mouth)
+    f(4, 10, 24, 12+gape, '#060008');
+    f(5, 11, 22, 10+gape, '#0a0010');
+    // Upper fangs
+    f(5, 10, 3, 5, '#d0c8a8'); f(9, 10, 3, 4, '#d0c8a8'); f(13, 10, 3, 5, '#d0c8a8');
+    f(17, 10, 3, 4, '#d0c8a8'); f(21, 10, 3, 5, '#d0c8a8');
+    // Lower fangs
+    f(6, 20+gape, 3, 5, '#c0b898'); f(10, 21+gape, 3, 4, '#c0b898'); f(14, 20+gape, 3, 5, '#c0b898');
+    f(18, 21+gape, 3, 4, '#c0b898'); f(22, 20+gape, 3, 5, '#c0b898');
+    // Void tongue
+    f(12, 16+gape, 8, 4, '#440020'); f(13, 17+gape, 6, 3, '#660030');
+    // Eyes above the maw
+    f(8, 5, 5, 4, '#0e0820');
+    f(19, 5, 5, 4, '#0e0820');
+    f(9, 6, 3, 2, '#aa00ff');
+    f(20, 6, 3, 2, '#aa00ff');
+    f(10, 6, 1, 1, '#ffffff');
+    f(21, 6, 1, 1, '#ffffff');
+  }
+
+  // ── Floor 9 — Court ──────────────────────────────────────────────────────────
+
+  private drawFallenKnight(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const lp = isWalk ? frame : 0;
+    const sh = lp === 2 ? 1 : lp === 0 ? -1 : 0;
+    f(10, 27, 6, 12+sh, '#1c1828'); f(17, 27, 6, 12-sh, '#1c1828');
+    f(9, 27, 6, 1, '#302840'); f(17, 27, 6, 1, '#302840');
+    // Corrupted black armor
+    f(8, 13, 16, 15, '#1c1828');
+    f(8, 13, 16, 1, '#302840');
+    f(8, 13, 1, 15, '#302840');
+    f(9, 14, 14, 13, '#24202e');
+    // Purple corruption veins on chest
+    f(13, 15, 6, 1, '#6020a0');
+    f(14, 17, 4, 3, '#6020a0');
+    f(12, 20, 8, 1, '#6020a0');
+    // Heavy arms
+    f(4, 13, 5, 3, '#1c1828'); f(2, 16, 5, 12, '#1c1828');
+    f(23, 13, 5, 3, '#1c1828'); f(25, 16, 5, 12, '#1c1828');
+    // Cursed greatsword (right, raised)
+    f(26, 3, 2, 26, '#282030'); f(26, 3, 2, 1, '#6040a0'); // blade
+    f(23, 5, 8, 2, '#1c1828'); // crossguard
+    f(26, 1, 2, 3, '#4030a0'); // pommel
+    // Corrupted shield (left)
+    f(1, 13, 7, 14, '#1c1828'); f(1, 13, 7, 1, '#302840');
+    f(2, 15, 5, 10, '#24202e');
+    f(3, 17, 3, 2, '#8030c0'); f(3, 20, 3, 2, '#8030c0');
+    // Head — dark knight helm
+    f(9, 3, 14, 11, '#1c1828');
+    f(10, 2, 12, 12, '#1c1828');
+    f(10, 3, 12, 10, '#24202e');
+    // Visor with void glow
+    f(11, 8, 10, 3, '#0e0c18');
+    f(12, 8, 3, 3, '#8030c0'); f(17, 8, 3, 3, '#8030c0');
+    // Crown of corruption
+    f(12, 1, 2, 3, '#6020a0'); f(15, 0, 2, 4, '#8030c0'); f(18, 1, 2, 3, '#6020a0');
+  }
+
+  private drawArcaneSentinel(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const lp = isWalk ? frame : 0;
+    const sh = lp === 2 ? 1 : lp === 0 ? -1 : 0;
+    f(10, 27, 6, 12+sh, '#2a2848'); f(17, 27, 6, 12-sh, '#2a2848');
+    f(9, 27, 6, 1, '#5060a0'); f(17, 27, 6, 1, '#5060a0');
+    // Magical construct body
+    f(8, 13, 16, 15, '#2a2848');
+    f(8, 13, 16, 1, '#5060a0');
+    f(8, 13, 1, 15, '#5060a0');
+    f(9, 14, 14, 13, '#343258');
+    // Arcane energy core (chest)
+    f(12, 16, 8, 8, '#1a1838');
+    f(13, 17, 6, 6, '#2030a0');
+    f(14, 18, 4, 4, '#4060d0');
+    f(15, 19, 2, 2, '#80a0ff');
+    // Gold trim
+    f(9, 14, 14, 1, '#c0a030');
+    f(9, 26, 14, 1, '#c0a030');
+    f(9, 14, 1, 13, '#c0a030');
+    f(22, 14, 1, 13, '#c0a030');
+    // Arms with energy orbs
+    f(4, 13, 5, 3, '#2a2848'); f(2, 16, 5, 12, '#2a2848');
+    f(23, 13, 5, 3, '#2a2848'); f(25, 16, 5, 12, '#2a2848');
+    f(1, 24, 6, 6, '#4060d0'); f(2, 25, 4, 4, '#80a0ff'); // energy hands
+    f(25, 24, 6, 6, '#4060d0'); f(26, 25, 4, 4, '#80a0ff');
+    // Head — arcane helm
+    f(9, 3, 14, 11, '#2a2848');
+    f(10, 2, 12, 12, '#2a2848');
+    f(10, 3, 12, 10, '#343258');
+    f(10, 2, 12, 1, '#c0a030'); // gold trim top
+    // Blue sentinel eyes
+    f(11, 7, 4, 4, '#1a1838');
+    f(17, 7, 4, 4, '#1a1838');
+    f(12, 8, 2, 2, '#4080ff'); f(18, 8, 2, 2, '#4080ff');
+    f(12, 8, 1, 1, '#c0e0ff'); f(18, 8, 1, 1, '#c0e0ff');
+  }
+
+  private drawEchoShade(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const drift = isWalk && frame % 2 === 1 ? 1 : 0;
+    // Fading echo ghost
+    f(12+drift, 28, 8, 8, '#0c1020');
+    f(11, 26, 10, 6, '#101420');
+    f(10, 24, 12, 6, '#141820');
+    f(9, 14, 14, 14, '#10182a');
+    f(9, 14, 14, 1, '#204878');
+    f(9, 14, 1, 14, '#204878');
+    f(10, 15, 12, 12, '#182038');
+    // Translucent arms
+    f(5, 15, 5, 2, '#101828'); f(3, 17, 4, 7, '#0c1420');
+    f(22, 15, 5, 2, '#101828'); f(25, 17, 4, 7, '#0c1420');
+    // Ghost head — echoed features
+    f(11, 4, 10, 11, '#10182a');
+    f(12, 3, 8, 12, '#182038');
+    f(12, 4, 8, 10, '#204058');
+    // Ghostly memories on face
+    f(12, 8, 3, 2, '#40a0e0'); // eyes (glimpse of who they were)
+    f(17, 8, 3, 2, '#40a0e0');
+    f(13, 8, 1, 1, '#c0e8ff');
+    f(18, 8, 1, 1, '#c0e8ff');
+    f(13, 12, 6, 1, '#204878'); // faint smile
+    // Energy wisps
+    f(8, 20, 2, 4, '#204878');
+    f(22, 18, 2, 4, '#204878');
+    f(15, 28, 2, 6, '#182038');
+  }
+
+  // ── Floor 10 — Throne ────────────────────────────────────────────────────────
+
+  private drawIronGuardian(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const lp = isWalk ? frame : 0;
+    const sh = lp === 2 ? 2 : lp === 0 ? -2 : 0;
+    // Colossal iron legs
+    f(7, 25, 8, 14+sh, '#2a2830'); f(17, 25, 8, 14-sh, '#2a2830');
+    f(6, 25, 8, 1, '#5a5868'); f(17, 25, 8, 1, '#5a5868');
+    // Massive body
+    f(6, 12, 20, 14, '#2a2830');
+    f(6, 12, 20, 1, '#5a5868');
+    f(6, 12, 1, 14, '#5a5868');
+    f(7, 13, 18, 12, '#34323c');
+    // Gold royal sigil on chest
+    f(11, 15, 10, 8, '#1e1c28');
+    f(15, 15, 2, 8, '#c0a030'); // cross
+    f(11, 18, 10, 2, '#c0a030');
+    f(13, 16, 6, 2, '#e0c040');
+    // Colossal arms
+    f(1, 11, 6, 4, '#2a2830'); f(0, 15, 5, 14, '#2a2830');
+    f(25, 11, 6, 4, '#2a2830'); f(27, 15, 5, 14, '#2a2830');
+    f(0, 28, 6, 6, '#5a5868'); // gauntlets
+    f(26, 28, 6, 6, '#5a5868');
+    // Void-energy spikes on pauldrons
+    f(3, 10, 4, 3, '#4020a0'); f(3, 10, 4, 1, '#8040e0');
+    f(25, 10, 4, 3, '#4020a0'); f(25, 10, 4, 1, '#8040e0');
+    // Titanic head — royal crown
+    f(7, 2, 18, 11, '#2a2830');
+    f(8, 1, 16, 12, '#2a2830');
+    f(8, 2, 16, 10, '#34323c');
+    // Crown
+    f(10, 0, 2, 3, '#c0a030'); f(14, 0, 4, 4, '#e0c040'); f(20, 0, 2, 3, '#c0a030');
+    f(8, 2, 16, 1, '#c0a030');
+    // Visor — void-purple
+    f(10, 6, 12, 4, '#1a1628');
+    f(11, 7, 3, 2, '#9040e0'); f(18, 7, 3, 2, '#9040e0');
+    f(11, 7, 1, 1, '#e080ff'); f(18, 7, 1, 1, '#e080ff');
+  }
+
+  private drawShadowHerald(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const lp = isWalk ? frame : 0;
+    const ll = lp === 2 ? 12 : lp === 0 ? 8 : 10;
+    const rl = lp === 2 ? 8  : lp === 0 ? 12 : 10;
+    // Dark fluid legs
+    f(12, 28, 4, ll, '#100818'); f(17, 28, 4, rl, '#100818');
+    f(10, 28+ll-2, 6, 4, '#1a0c22'); f(16, 28+rl-2, 6, 4, '#1a0c22');
+    // Shadow-substance body
+    f(9, 15, 14, 14, '#100818');
+    f(9, 15, 14, 1, '#301850');
+    f(10, 16, 12, 12, '#180c20');
+    // Void herald cloak flowing behind
+    f(6, 16, 4, 14, '#0c0610'); f(4, 18, 3, 12, '#080408');
+    f(22, 16, 4, 14, '#0c0610'); f(25, 18, 3, 12, '#080408');
+    // Arms wielding shadow blades
+    f(5, 15, 5, 2, '#100818'); f(3, 17, 4, 8, '#100818');
+    f(23, 15, 5, 2, '#100818'); f(25, 17, 4, 8, '#100818');
+    // Shadow blades
+    f(2, 13, 2, 14, '#1c0030'); f(2, 13, 2, 1, '#8020d0');
+    f(28, 13, 2, 14, '#1c0030'); f(28, 13, 2, 1, '#8020d0');
+    // Dark head with void crown
+    f(10, 4, 12, 12, '#100818');
+    f(11, 3, 10, 13, '#100818');
+    f(11, 4, 10, 11, '#180c20');
+    f(12, 1, 2, 4, '#6020a0'); f(15, 0, 2, 5, '#8020d0'); f(18, 1, 2, 4, '#6020a0');
+    // Eyes of shadow
+    f(12, 8, 3, 2, '#4000a0');
+    f(17, 8, 3, 2, '#4000a0');
+    f(13, 8, 1, 1, '#c060ff');
+    f(18, 8, 1, 1, '#c060ff');
+  }
+
+  private drawVoidHerald(f: (x:number,y:number,w:number,h:number,c:string)=>void, isWalk: boolean, frame: number): void {
+    const drift = isWalk && frame % 2 === 1 ? 2 : 0;
+    // Void caster — levitating
+    f(13+drift, 30, 6, 8, '#0a0620');
+    f(11, 28, 10, 6, '#0e0a28');
+    f(10, 24, 12, 6, '#12102e');
+    // Body wrapped in void energy
+    f(9, 13, 14, 14, '#0e0a28');
+    f(8, 16, 16, 10, '#0e0a28');
+    f(9, 14, 14, 12, '#14103a');
+    f(10, 15, 12, 10, '#1c1448');
+    // Void energy robes
+    f(6, 17, 4, 12, '#0c0820'); f(4, 20, 3, 8, '#090618');
+    f(22, 17, 4, 12, '#0c0820'); f(25, 20, 3, 8, '#090618');
+    // Channeling arms — void orbs
+    f(5, 14, 5, 2, '#0e0a28'); f(2, 16, 4, 8, '#0e0a28');
+    f(23, 14, 5, 2, '#0e0a28'); f(26, 16, 4, 8, '#0e0a28');
+    f(0, 22, 7, 7, '#1a0850'); f(1, 23, 5, 5, '#3010a0'); f(2, 24, 3, 3, '#6020e0'); f(3, 25, 1, 1, '#c040ff');
+    f(25, 22, 7, 7, '#1a0850'); f(26, 23, 5, 5, '#3010a0'); f(27, 24, 3, 3, '#6020e0'); f(28, 25, 1, 1, '#c040ff');
+    // Head — void-consumed
+    f(10, 3, 12, 11, '#0e0a28');
+    f(11, 2, 10, 12, '#14103a');
+    f(11, 3, 10, 10, '#1c1448');
+    // Void crown (floating above)
+    f(13, 0, 6, 4, '#2010a0'); f(14, 0, 4, 1, '#8030f0');
+    f(12, 1, 2, 2, '#1808a0'); f(18, 1, 2, 2, '#1808a0');
+    // Eyes — void vortices
+    f(12, 7, 3, 3, '#0a0420');
+    f(17, 7, 3, 3, '#0a0420');
+    f(13, 8, 1, 1, '#c040ff'); f(18, 8, 1, 1, '#c040ff');
+    f(12, 7, 1, 1, '#8020e0'); f(17, 7, 1, 1, '#8020e0');
+    // Void mouth
+    f(13, 11, 6, 2, '#0a0420');
+    f(14, 11, 4, 1, '#6020c0');
+  }
+
   // ── Effect textures ───────────────────────────────────────────────────────────
   private buildEffectTextures(): void {
     // Slash (32×32)
@@ -1623,6 +3390,117 @@ export class PreloadScene extends Phaser.Scene {
       f(10, 10, 12, 12, 'rgba(80,120,220,0.45)');
       f(13, 13,  6,  6, '#6688cc');
     });
+
+    // ── Projectile VFX ────────────────────────────────────────────────────────
+    // Ice shard (14×8)
+    this.buildTrap32('fx_ice_shard', ctx => {
+      ctx.clearRect(0, 0, 32, 32);
+      const f = mk(ctx);
+      f(4,  12, 2,  8, '#aaddff'); // shard tip
+      f(6,  10, 4, 12, '#88ccff');
+      f(10,  9, 6, 14, '#66aaee');
+      f(16,  9, 6, 14, '#4488cc');
+      f(22, 10, 4, 12, '#2266aa');
+      f(26, 12, 2,  8, '#1a4488');
+      f(7,  12, 18,  8, '#cceeff'); // ice core highlight
+      f(9,  13, 14,  6, '#ffffff');
+    });
+    // Lightning orb (12×12)
+    this.buildTrap32('fx_lightning_orb', ctx => {
+      ctx.clearRect(0, 0, 32, 32);
+      const f = mk(ctx);
+      f(10,  2, 12, 28, '#5566ff'); // glow body
+      f(8,   6, 16, 20, '#7788ff');
+      f(10, 10, 12, 12, '#aabbff'); // core
+      f(12, 12,  8,  8, '#ffffff'); // bright center
+      // Arc spikes
+      f(4,  10,  6,  2, '#88aaff'); f(22, 10,  6,  2, '#88aaff');
+      f(14,  0,  4,  6, '#88aaff'); f(14, 26,  4,  6, '#88aaff');
+      f(6,   5,  3,  3, '#aabbff'); f(23,  5,  3,  3, '#aabbff');
+      f(6,  24,  3,  3, '#aabbff'); f(23, 24,  3,  3, '#aabbff');
+    });
+    // Void orb (12×12)
+    this.buildTrap32('fx_void_orb', ctx => {
+      ctx.clearRect(0, 0, 32, 32);
+      const f = mk(ctx);
+      f(10,  4, 12, 24, '#220033'); // outer ring
+      f(6,   8, 20, 16, '#220033');
+      f(8,   6, 16, 20, '#440066');
+      f(10,  8, 12, 16, '#660088'); // mid ring
+      f(8,  10, 16, 12, '#660088');
+      f(10, 10, 12, 12, '#8800aa'); // inner glow
+      f(12, 12,  8,  8, '#cc44ff'); // bright core
+      f(14, 14,  4,  4, '#ffffff');
+      // Void tendrils
+      f(4,  14,  6,  4, '#440066'); f(22, 14,  6,  4, '#440066');
+      f(14,  2,  4,  6, '#440066'); f(14, 24,  4,  6, '#440066');
+    });
+
+    // ── Ailment overlay sprites (16×16 indicator shown over afflicted entity) ──
+    const ailmentOverlay = (key: string, draw: (f: ReturnType<typeof mk>) => void): void => {
+      const t = this.textures.createCanvas(key, 16, 16);
+      if (!t) return;
+      const ctx = t.getContext();
+      ctx.clearRect(0, 0, 16, 16);
+      draw(mk(ctx));
+      t.refresh();
+    };
+    ailmentOverlay('ailment_burn', f => {
+      f(4,  8, 3, 8, '#ff4400'); f(7, 5,  3, 11, '#ff6600'); f(10, 7, 3, 9, '#ff4400');
+      f(6,  3, 2, 5, '#ff8800'); f(9, 2,  2, 6,  '#ffaa00');
+      f(7,  0, 2, 4, '#ffee44'); // flame tip
+    });
+    ailmentOverlay('ailment_poison', f => {
+      f(5, 2, 6, 12, '#20aa28'); f(3, 4, 10, 8, '#20aa28'); // droplet shape
+      f(6, 3, 4, 10, '#40cc40'); f(7, 4, 2,  8, '#80ff88'); // highlight
+      f(8, 5, 1,  3, '#ffffff');
+    });
+    ailmentOverlay('ailment_freeze', f => {
+      // Snowflake shape
+      f(7, 0, 2, 16, '#88ccff'); f(0, 7, 16, 2, '#88ccff');
+      f(2, 2, 2, 2,  '#88ccff'); f(12, 2, 2, 2, '#88ccff');
+      f(2, 12, 2, 2, '#88ccff'); f(12,12, 2, 2, '#88ccff');
+      f(7, 7, 2, 2,  '#ffffff'); // center
+    });
+    ailmentOverlay('ailment_shock', f => {
+      // Lightning bolt
+      f(10, 0, 3, 6,  '#ffee44'); f(7, 5,  4, 5, '#ffee44');
+      f(7,  5, 6, 2,  '#ffee44'); f(4, 9,  4, 7, '#ffee44');
+      f(6,  0, 5, 8,  '#ffffff'); f(4, 7,  6, 2, '#ffffff');
+      f(4,  8, 4, 8,  '#ffffff');
+    });
+
+    // ── Perfect dodge ping (24×24 circle burst) ──────────────────────────────
+    const ping = this.textures.createCanvas('fx_dodge_ping', 24, 24);
+    if (ping) {
+      const ctx = ping.getContext();
+      ctx.clearRect(0, 0, 24, 24);
+      const f = mk(ctx);
+      // Ring burst — outer white ring, inner cyan fill
+      f(4,  0, 16, 3, '#ffffff'); f(4, 21, 16, 3, '#ffffff');
+      f(0,  4,  3,16, '#ffffff'); f(21, 4,  3,16, '#ffffff');
+      f(2,  2,  3, 3, '#ffffff'); f(19, 2,  3, 3, '#ffffff');
+      f(2, 19,  3, 3, '#ffffff'); f(19,19,  3, 3, '#ffffff');
+      f(6,  1, 12, 2, '#aaffff'); f(6, 21, 12, 2, '#aaffff');
+      f(1,  6,  2,12, '#aaffff'); f(21, 6,  2,12, '#aaffff');
+      ping.refresh();
+    }
+
+    // ── Break / shatter effect (24×24 fragments) ─────────────────────────────
+    const shatter = this.textures.createCanvas('fx_shatter', 24, 24);
+    if (shatter) {
+      const ctx = shatter.getContext();
+      ctx.clearRect(0, 0, 24, 24);
+      const f = mk(ctx);
+      // Radial fragment shards
+      f(10,  0, 4,  6, '#e8d0b0'); f(10, 18, 4,  6, '#e8d0b0');
+      f(0,  10, 6,  4, '#e8d0b0'); f(18, 10, 6,  4, '#e8d0b0');
+      f(2,   2, 4,  4, '#c8b090'); f(18,  2, 4,  4, '#c8b090');
+      f(2,  18, 4,  4, '#c8b090'); f(18, 18, 4,  4, '#c8b090');
+      f(5,   5, 3,  3, '#ffffff'); f(16,  5, 3,  3, '#ffffff');
+      f(5,  16, 3,  3, '#ffffff'); f(16, 16, 3,  3, '#ffffff');
+      shatter.refresh();
+    }
   }
 
   /** Build a 32×32 single-frame canvas texture. */
@@ -2675,28 +4553,237 @@ export class PreloadScene extends Phaser.Scene {
     if (tex) { drawFn(tex.getContext()); tex.refresh(); }
   }
 
+  // ── Weapon overlay textures (32×48, transparent background) ─────────────────
+  private buildWeaponOverlays(): void {
+    const mkW = (key: string, drawFn: (f: (x:number,y:number,w:number,h:number,c:string)=>void)=>void): void => {
+      const t = this.textures.createCanvas(`weapon_${key}`, 32, 48);
+      if (!t) return;
+      const ctx = t.getContext();
+      ctx.clearRect(0, 0, 32, 48);
+      drawFn(mk(ctx));
+      t.refresh();
+    };
+
+    mkW('sword', f => {
+      f(15, 4, 2, 24, P.metal); f(15, 4, 2, 1, P.metal_hi);
+      f(12, 10, 8, 2, P.metal_sh); // crossguard
+      f(15, 27, 2, 3, P.brown);    // handle
+      f(14, 30, 4, 2, P.gold);     // pommel
+    });
+    mkW('bow', f => {
+      f(14, 2, 4, 44, P.brown); f(14, 2, 2, 1, P.gold_dk);
+      f(14, 44, 2, 2, P.gold_dk);  // bow tips
+      // bowstring
+      f(15, 3, 1, 42, P.bone);
+    });
+    mkW('staff', f => {
+      f(15, 6, 2, 38, P.brown); f(14, 6, 4, 1, P.brown_dk);
+      f(13, 4, 6, 5, '#3344cc'); f(12, 5, 8, 3, '#5566ee'); // crystal
+      f(14, 6, 4, 2, '#99aaff');
+    });
+    mkW('greatsword', f => {
+      f(14, 2, 4, 28, P.metal); f(14, 2, 4, 1, P.metal_hi);
+      f(10, 14, 12, 3, P.metal_sh); // wide crossguard
+      f(14, 16, 4, 1, P.metal);
+      f(14, 30, 4, 4, P.brown); f(13, 33, 6, 3, P.gold);
+    });
+    mkW('dagger', f => {
+      f(14, 12, 4, 16, P.metal); f(14, 12, 4, 1, P.metal_hi);
+      f(12, 18, 8, 2, P.gold_dk); // crossguard
+      f(14, 22, 4, 4, P.brown);
+      f(13, 26, 6, 2, P.metal_sh);
+    });
+    mkW('mace', f => {
+      f(15, 14, 2, 28, P.brown); // shaft
+      f(11, 8, 10, 8, P.metal_dk); f(11, 8, 10, 1, P.metal); // head
+      for (let i = 0; i < 4; i++) { // flanges
+        f(9+i*4, 6, 2, 4, P.metal_sh); f(10+i*4, 5, 1, 3, P.metal);
+      }
+    });
+    mkW('spear', f => {
+      f(15, 6, 2, 38, P.brown); f(15, 6, 2, 1, P.brown_dk);
+      f(14, 2, 4, 8, P.metal); f(13, 4, 6, 2, P.metal_sh); // spearhead
+      f(14, 2, 4, 1, P.metal_hi);
+      f(13, 10, 6, 2, P.metal_sh); // collar
+    });
+    mkW('crossbow', f => {
+      f(15, 14, 2, 28, P.brown); // stock
+      f(8, 16, 16, 3, P.brown_dk); // arms
+      f(8, 16, 16, 1, P.brown);
+      f(14, 4, 4, 12, P.metal); f(12, 10, 8, 2, P.metal_sh); // prod
+      // bowstring
+      f(9, 17, 1, 1, P.bone); f(22, 17, 1, 1, P.bone);
+      f(10, 17, 6, 1, P.bone); f(16, 17, 6, 1, P.bone);
+    });
+    mkW('tome', f => {
+      f(10, 12, 12, 18, '#3a3060'); f(10, 12, 12, 1, '#5a50a0'); // cover
+      f(10, 12, 1, 18, '#5a50a0');
+      f(9, 14, 14, 14, '#2a2050');
+      f(12, 17, 8, 1, P.gold); f(15, 15, 2, 6, P.gold); // rune cross
+      f(12, 22, 8, 1, P.gold);
+      f(14, 15, 4, 6, '#ffffff');   // glow center
+    });
+    mkW('gauntlets', f => {
+      // two gauntlets side by side
+      f(8, 16, 6, 10, P.metal_dk); f(18, 16, 6, 10, P.metal_dk);
+      f(8, 16, 6, 1, P.metal); f(18, 16, 6, 1, P.metal);
+      f(6, 22, 8, 6, P.metal_dk);  f(18, 22, 8, 6, P.metal_dk); // knuckle plates
+      for (let i = 0; i < 3; i++) {
+        f(7+i*2, 23, 2, 4, P.metal_sh);
+        f(19+i*2, 23, 2, 4, P.metal_sh);
+      }
+    });
+  }
+
+  // ── Item icon textures (16×16, used in inventory/hotbar) ─────────────────────
+  private buildItemIcons(): void {
+    const mkI = (key: string, drawFn: (f: (x:number,y:number,w:number,h:number,c:string)=>void)=>void): void => {
+      const t = this.textures.createCanvas(`icon_${key}`, 16, 16);
+      if (!t) return;
+      const ctx = t.getContext();
+      ctx.clearRect(0, 0, 16, 16);
+      drawFn(mk(ctx));
+      t.refresh();
+    };
+
+    // Potions
+    mkI('potion_hp', f => {
+      f(5, 3, 6, 1, '#d0c8b0'); f(5, 2, 6, 2, '#a09080'); // cork
+      f(4, 4, 8, 9, '#cc2828'); f(3, 6, 10, 5, '#cc2828'); // bottle
+      f(5, 5, 6, 7, '#ee4040'); f(6, 6, 4, 4, '#ff8080'); // highlight
+      f(5, 13, 6, 2, '#882020'); // base
+    });
+    mkI('potion_mp', f => {
+      f(5, 3, 6, 1, '#d0c8b0'); f(5, 2, 6, 2, '#a09080');
+      f(4, 4, 8, 9, '#2840cc'); f(3, 6, 10, 5, '#2840cc');
+      f(5, 5, 6, 7, '#4060ee'); f(6, 6, 4, 4, '#8090ff');
+      f(5, 13, 6, 2, '#182080');
+    });
+    mkI('potion_antidote', f => {
+      f(5, 3, 6, 1, '#d0c8b0'); f(5, 2, 6, 2, '#a09080');
+      f(4, 4, 8, 9, '#20aa28'); f(3, 6, 10, 5, '#20aa28');
+      f(5, 5, 6, 7, '#40cc40'); f(6, 6, 4, 4, '#80ff88');
+      f(5, 13, 6, 2, '#186020');
+    });
+
+    // Weapons
+    mkI('sword', f => {
+      f(7, 1, 2, 10, P.metal); f(7, 1, 2, 1, P.metal_hi);
+      f(5, 6, 6, 1, P.metal_sh); // crossguard
+      f(7, 11, 2, 3, P.brown); f(6, 13, 4, 2, P.gold_dk);
+    });
+    mkI('bow', f => {
+      f(6, 0, 4, 16, P.brown);   // bow arc
+      f(4, 1, 4, 2, P.brown_dk); f(4, 13, 4, 2, P.brown_dk);
+      f(7, 1, 2, 14, '#d0c898'); // bowstring
+    });
+    mkI('staff', f => {
+      f(7, 3, 2, 12, P.brown);
+      f(5, 1, 6, 4, '#4455dd'); f(6, 2, 4, 2, '#8899ff');
+    });
+    mkI('dagger', f => {
+      f(7, 2, 2, 8, P.metal); f(7, 2, 2, 1, P.metal_hi);
+      f(5, 7, 6, 1, P.gold_dk); f(7, 8, 2, 4, P.brown);
+    });
+
+    // Armor
+    mkI('helmet', f => {
+      f(4, 4, 8, 8, P.metal_dk); f(4, 4, 8, 1, P.metal);
+      f(3, 6, 10, 5, P.metal_dk); f(3, 6, 10, 1, P.metal);
+      f(5, 9, 6, 3, '#1a1828'); // visor
+    });
+    mkI('chest', f => {
+      f(3, 3, 10, 11, P.metal_dk); f(3, 3, 10, 1, P.metal);
+      f(4, 4, 8, 9, P.metal_sh);
+      f(7, 5, 2, 7, P.metal); // center keel
+      f(3, 13, 10, 1, P.gold); // belt
+    });
+    mkI('boots', f => {
+      f(4, 8, 5, 7, P.leather_dk); f(4, 8, 5, 1, P.leather);
+      f(2, 13, 6, 3, P.leather_dk); f(2, 14, 6, 1, P.leather_hi);
+    });
+
+    // Materials
+    mkI('ore_iron', f => {
+      f(2, 4, 12, 10, P.stone_dk); f(2, 4, 12, 1, P.stone);
+      f(4, 6, 4, 4, P.metal); f(5, 7, 2, 2, P.metal_hi); // ore vein
+      f(8, 8, 4, 3, P.metal_sh);
+    });
+    mkI('ore_gold', f => {
+      f(2, 4, 12, 10, P.stone_dk); f(2, 4, 12, 1, P.stone);
+      f(4, 6, 4, 4, P.gold); f(5, 7, 2, 2, '#ffee80');
+      f(8, 8, 4, 3, P.gold_dk);
+    });
+    mkI('herb', f => {
+      f(7, 10, 2, 5, '#3a5018'); // stem
+      f(3, 5, 5, 6, '#2a7028'); f(2, 6, 5, 4, '#3a8038'); // leaf left
+      f(8, 4, 5, 6, '#2a7028'); f(8, 5, 5, 4, '#3a8038'); // leaf right
+      f(6, 2, 4, 4, '#e84040'); f(7, 2, 2, 2, '#ff8080'); // flower
+    });
+    mkI('monster_part', f => {
+      f(4, 2, 8, 12, '#5a3820'); f(4, 2, 8, 1, '#7a5030');
+      f(5, 3, 6, 10, '#6a4428');
+      f(3, 10, 3, 4, '#4a2818'); f(10, 10, 3, 4, '#4a2818'); // claw
+      f(3, 11, 2, 1, '#8a6040'); f(11, 11, 2, 1, '#8a6040');
+    });
+    mkI('essence', f => {
+      f(5, 2, 6, 12, '#3a1860'); f(3, 4, 10, 8, '#3a1860'); // container
+      f(6, 3, 4, 10, '#5a2888'); f(7, 4, 2, 8, '#9040cc'); // glow
+      f(7, 6, 2, 4, '#e080ff');  f(7, 7, 2, 2, '#ffffff');
+    });
+    mkI('whetstone', f => {
+      f(2, 5, 12, 8, '#8a8898'); f(2, 5, 12, 1, '#aaaab8'); // stone
+      f(3, 6, 10, 6, '#9a9aaa');
+      f(5, 5, 2, 1, '#c0c0d0'); f(9, 5, 2, 1, '#c0c0d0'); // edge highlights
+    });
+    mkI('camp_kit', f => {
+      f(2, 8, 12, 8, '#7a5030'); f(2, 8, 12, 1, '#9a7048'); // pack base
+      f(4, 4, 8, 5, '#9a6040'); f(4, 4, 8, 1, '#b08050'); // flap
+      f(5, 9, 2, 3, '#c09020'); f(9, 9, 2, 3, '#c09020'); // buckles
+      f(6, 6, 4, 2, '#c09020'); // latch
+    });
+    mkI('smoke_bomb', f => {
+      f(5, 6, 6, 8, '#4a4858'); f(3, 8, 10, 4, '#4a4858'); // bomb
+      f(6, 4, 4, 3, '#3a3848'); // neck
+      f(7, 2, 2, 3, P.metal_sh); f(6, 3, 4, 1, P.metal); // fuse
+      f(7, 1, 2, 2, '#ff8800'); // spark
+    });
+  }
+
   // ── Animation registration ────────────────────────────────────────────────────
   private registerAllAnims(): void {
     for (const clazz of CLASS_IDS) {
-      this.registerPlayerAnims(clazz);
+      this.registerPlayerAnims(clazz, 'human');
+    }
+    for (const race of RACE_IDS) {
+      if (race === 'human') continue;
+      for (const clazz of CLASS_IDS) {
+        this.registerPlayerAnims(clazz, race);
+      }
     }
     for (const id of ENEMY_IDS) {
       this.registerEnemyAnims(id);
     }
   }
 
-  private registerPlayerAnims(clazz: ClassId): void {
-    const key = `player_${clazz}`;
-    const add = (clip: string, count: number, rate: number): void => {
+  private registerPlayerAnims(clazz: ClassId, race: RaceId = 'human'): void {
+    const texKey = race === 'human' ? `player_${clazz}` : `player_${race}_${clazz}`;
+    const prefix = race === 'human' ? clazz : `${race}_${clazz}`;
+    const add = (clip: string, count: number, rate: number, loop = true): void => {
       this.anims.create({
-        key: `${clazz}_${clip}`,
-        frames: Array.from({ length: count }, (_, i) => ({ key, frame: `${clip}_${i}` })),
+        key: `${prefix}_${clip}`,
+        frames: Array.from({ length: count }, (_, i) => ({ key: texKey, frame: `${clip}_${i}` })),
         frameRate: rate,
-        repeat: -1,
+        repeat: loop ? -1 : 0,
       });
     };
-    add('idle_down', 2, 2); add('idle_up', 2, 2); add('idle_side', 2, 2);
-    add('walk_down', 4, 8); add('walk_up', 4, 8); add('walk_side', 4, 8);
+    add('idle_down', 2, 2);   add('idle_up', 2, 2);   add('idle_side', 2, 2);
+    add('walk_down', 4, 8);   add('walk_up', 4, 8);   add('walk_side', 4, 8);
+    add('attack_down', 3, 12, false);
+    add('attack_up',   3, 12, false);
+    add('attack_side', 3, 12, false);
+    add('hurt', 2, 10, false);
+    add('die',  4,  6, false);
   }
 
   private registerEnemyAnims(id: string): void {

@@ -2,7 +2,8 @@
 
 > A single-player, pixel-art, roguelike dungeon crawler for the web.
 > This document is the source of truth for scaffolding with **Claude Code**.
-> Build **Phase 0** first (walk around an empty map). Everything else is context so the architecture doesn't paint itself into a corner.
+>
+> **Current status: PHASE 6 (P1–P5 complete, ready for art/polish pass)**
 
 All in-game text is **English**.
 
@@ -29,43 +30,18 @@ A 10-floor dungeon crawler with hardcore permadeath. The player creates one char
 | Bundler / dev server | **Vite** | Fast HMR, simple static build. |
 | State (game) | In-engine + plain TS modules | No heavy state lib needed for single-player. |
 | Hosting | Static (Vercel / Netlify / Cloudflare Pages) | Just ship the `dist/` bundle. |
-| Backend (later) | **Supabase** | Auth + Postgres. Save = one JSONB blob per user. NOT needed for Phase 0. |
-| Art tool | Aseprite (authoring) / free packs (Kenney, itch.io) for placeholders | |
-
-> **Do not** build a custom game server, websockets, or anti-cheat. It is single-player and client-authoritative.
+| Backend | **Supabase** | Auth + Postgres. Save = one JSONB blob per player (IP-based). |
+| Art tool | Aseprite (authoring) / free packs for placeholders | |
 
 ---
 
 ## 3. Pixel art spec
 
-These constraints keep the whole game visually cohesive. Bake them into the Phaser config and asset pipeline.
-
 - **Base tile size:** `32 x 32 px`
-- **Character sprites:** `32 x 40 px` (placed in a `32 x 48` cell with headroom for tall races/hats)
+- **Character sprites:** `32 x 40 px` (placed in a `32 x 48` cell with headroom)
 - **Item / UI icons:** `32 x 32` (inventory) and `16 x 16` (hotbar)
-- **Internal render resolution:** `480 x 270` (16:9). Integer-scaled to the window (×4 = 1920×1080). Shows ~15 tiles wide × ~8.5 tiles tall.
-- **Phaser scale:** `Phaser.Scale.FIT` with `pixelArt: true`, `roundPixels: true`, `antialias: false`, `zoom` via integer scale.
-- **Palette:** curated, ~32–48 colors, shared across all art. Starter palette below (extend as needed, but keep it tight for cohesion).
-
-### Starter palette (RGB)
-```
-outline    28,24,34       skin       232,184,142   skin_shadow  196,146,104
-elf_skin   226,208,184    beastman   210,170,128   beard        168,116,72
-metal      156,162,178    metal_dk   112,118,134   metal_hi     206,210,226
-green      78,138,78      green_dk   54,100,54      red          184,62,56
-leather    124,88,56      leather_dk 92,62,40       wood         146,104,62
-dark_cloth 58,52,66       gold       214,174,74     fur          150,120,86
-eye_white  245,245,245    pupil      44,44,64       amber_glow   240,176,64
-```
-
-### Animation conventions
-Each character spritesheet has these clips (4-directional where relevant):
-- `idle_down / idle_up / idle_side` — 2 frames
-- `walk_down / walk_up / walk_side` — 4 frames (side flips horizontally for left/right)
-- `attack_down / attack_up / attack_side` — 3 frames
-- `hurt` — 1 frame, `die` — 1 frame
-
-Pack into a Phaser texture atlas (JSON + PNG). Naming: `{race}_{class}_{clip}_{frame}`.
+- **Internal render resolution:** `480 x 270` (16:9). Integer-scaled to the window.
+- **Phaser scale:** `Phaser.Scale.FIT` with `pixelArt: true`, `roundPixels: true`, `antialias: false`.
 
 ---
 
@@ -73,15 +49,13 @@ Pack into a Phaser texture atlas (JSON + PNG). Naming: `{race}_{class}_{clip}_{f
 
 ### 4.1 Races and classes
 
-Each race may only pick classes that fit it. Humans are the versatile "pick anything" race.
-
 | Race | Stat modifiers | Allowed classes |
 |---|---|---|
-| **Human** | +1 to all (versatile) | Swordman, Archer, Tanker, Assassin, Sage |
-| **Elf** | +DEX +INT, −VIT | Swordman, Archer, Assassin, Sage |
-| **Dwarf** | +VIT +STR, −AGI | Swordman, Tanker, Sage |
-| **Barbarian** | +STR +maxHP, −INT | Swordman, Archer, Tanker |
-| **Beastman** | +AGI +DEX, −INT | Swordman, Archer, Tanker, Assassin |
+| **Human** | +1 to all | Swordman, Archer, Tanker, Assassin, Sage |
+| **Elf** | +DEX +2, +INT +2, −VIT | Swordman, Archer, Assassin, Sage |
+| **Dwarf** | +VIT +2, +STR +2, −AGI −2 | Swordman, Tanker, Sage |
+| **Barbarian** | +STR +2, +HP +30, −INT −2 | Swordman, Archer, Tanker |
+| **Beastman** | +AGI +2, +DEX +2, −INT −2 | Swordman, Archer, Tanker, Assassin |
 
 **Classes** (role + starting equipment):
 
@@ -89,88 +63,127 @@ Each race may only pick classes that fit it. Humans are the versatile "pick anyt
 |---|---|---|
 | **Swordman** | Balanced melee | Short Sword, Leather Armor, 3× Health Potion |
 | **Archer** | Ranged DPS (DEX) | Short Bow, 20× Arrow, Leather Armor, 3× Health Potion |
-| **Tanker** | Defense / aggro | Mace, Round Shield, Chainmail, 5× Health Potion |
+| **Tanker** | Defense / guard | Mace, Round Shield, Chainmail, 5× Health Potion |
 | **Assassin** | Burst / crit (AGI) | Twin Daggers, Light Leather, 3× Health Potion, 2× Smoke Bomb |
-| **Sage** | Magic / support (INT) | Staff, Robe, 3× Mana Potion, Fireball Tome |
+| **Sage** | Magic / ranged (INT) | Staff, Robe, 3× Mana Potion, Fireball Tome |
 
 ### 4.2 Stats
-Core block per character: `HP, MP, STR, DEX, INT, VIT, AGI`.
-- HP from VIT, MP from INT, physical dmg from STR/DEX, magic dmg from INT, crit/dodge from AGI.
-- Base stats per class + race modifiers, applied at creation. Level-ups grant points (deferred to combat phase).
+
+Core block: `HP, MP, STR, DEX, INT, VIT, AGI`.
+- Max Stamina is flat 100 for all classes.
+- Physical ATK = `max(6, STR×3+DEX) × weapon MV`. Magic ATK = same × 1.4.
+- Crit chance = `3% + AGI × 0.6%`. Crit damage = 135%.
+- XP curve: `50 × level^1.6`. Level cap 50. **+5 stat points** and **+1 skill point** per level.
 
 ### 4.3 Character creation flow
-`New Game → choose Race → choose Class (filtered to that race) → confirm` → create save → spawn in **Town** at the **Dungeon Gate** with starting gear and full HP/MP.
+`New Game → choose Race → choose Class (filtered to that race) → confirm` → create save → spawn in **Town** at the **Dungeon Gate** with starting gear.
 
 ### 4.4 Permadeath save model
-- **One character per account.** Fixed save slot `0`.
-- On death: show death screen → **delete** the save record → return to character creation.
-- The save is a single JSON blob (see §6). No mid-floor checkpoints; the Inn is the only "rest" (full heal). Town is always safe.
-- (Optional later: append a row to a `run_history` table for a graveyard/stats screen.)
+- **One character per account.** IP-based player ID.
+- On death: show death screen (cause, floor, time, gold) → `SaveManager.wipe()` → main menu.
+- **Account meta** (`nd_account_meta`) survives permadeath: run history (50 entries), Hall of Champions (victories), unlocked checkpoint floors.
+- Checkpoint floors: defeating floor N boss permanently unlocks floor N+1 as a start option for future runs.
 
 ### 4.5 Town (hub)
-The overworld safe zone. Contains:
-- **Dungeon Gate** — entrance to floor 1; player spawns here on new game.
-- **Weapon & Armor Shop** — buy/sell gear.
-- **Item Shop** — potions, consumables.
-- **Inn** — pay to rest → full HP/MP restore (acts as the soft "checkpoint"; does not prevent permadeath).
+A hand-authored 64×52 tile map. All buildings and locations:
+- **Armory** — buy weapons/armor, upgrade equipment (+1 to +5), forge boss-material gear
+- **The Last Inn** — rest (30 g) → full HP/MP restore; companions recover fatigue
+- **Emporium** — consumables, ammo, Adventure Bag
+- **Sage's Tower** — enchant (add affixes), socket runes, transmute items
+- **Chapel** — blessing and passive buffs
+- **Adventurer's Guild** — hire companions (up to 2), daily bounties (4 of 22 pool, date-seeded), run graveyard (Hall of Champions + last 6 runs)
+- **Wandering Stall** — daily-rotating rare vendor (3 of 12 items, date-seeded)
+- **Town Guard** — banter NPC, reacts to player's deepest floor and boss kills
+- **Dungeon Gate** — enter dungeon; shows checkpoint floor selector if any floors above 1 are unlocked
 
-Interactions are proximity + key prompt ("Press E"). Each is an interactable entity, not a separate scene (keep it simple: open a UI panel overlay).
+### 4.6 Dungeon floors
+- **Floor 1:** 500×400 tiles. **Floor 2:** 1,000×800 tiles (multi-biome quadrant layout). **Floors 3–10:** 500×400 tiles each, with a unique procedural floor-tile theme per floor.
+- Generated from a **seeded BSP** algorithm. Seed + floor number stored in save; map regenerated deterministically on load.
+- Each floor has a **spawn budget** (180 + floor×55) allocating themed enemies.
+- **Up to 8 warp pads** per floor, placed in a 4×2 sector grid.
+- **Traps:** spike, alarm, net — 1 per room average.
+- **Bosses:** one boss per floor in a dedicated room. Two phases + enrage at 20% HP. Break parts for extra loot. Each boss has a unique procedural sprite (`boss_<id>` key).
+- **Anomalies:** 22% chance per floor; 15 types (combat, puzzle, shop, survival events).
+- **Ambient spawning:** every 22 s, 1–3 themed enemies spawn 8–22 tiles away.
 
-### 4.6 Dungeon floors (the "25 km²" question)
-**25 km² is the in-world lore scale, not a literal tile count.** Do not author or render a 5000×5000 tile grid. Instead:
+### 4.7 Combat
+Real-time action combat with stamina, dodge i-frames, poise, and guard/parry.
+- **Stamina** (100 max, 18/s regen after 600 ms delay). Dodge (25), light (8), heavy (22).
+- **Dodge:** 200 ms total, i-frames at ms 50–150.
+- **Poise:** heavy hits + stagger system. Brutes have super-armor.
+- **Guard (Tanker):** 60% block, 100 ms perfect window for nullify + stun.
+- **Weapon families:** each of 10 families has unique mechanics (greatsword charge, dagger frenzy, crossbow pierce, gauntlet flow stacks, etc.).
+- **Status effects:** Poison, Lightning Shock, Frostbite, Burn, Void Corruption — each with build-up mechanic.
+- **Skills:** class skill trees, 1 point per level.
 
-- Each floor is a **procedurally generated** tilemap of connected rooms (small to large) plus corridors, built from a **seeded RNG**. Store only the seed + floor number in the save; regenerate deterministically on load.
-- Suggested generator: **BSP partition** or **room-graph + corridor carving**. Target floor size ~`192 x 192` to `384 x 384` tiles (big, but bounded).
-- **Render only what's near the camera.** Phaser tilemap layers cull off-screen tiles automatically; keep collision to the active region.
-- **Warp pads:** place `2–4` pads per floor in random rooms. Stepping on one transitions to floor `N+1` (regenerated from a new seed). Floor 10's pad leads to the final room / boss (deferred).
-- Difficulty (enemy density, loot tier) scales with floor number.
+### 4.8 Inventory & equipment
+- 10 equipment slots: head, chest, hands, legs, boots, mainhand, offhand, weapon2, amulet, ring + charm.
+- Items have **rarity** (common → mythic), **affixes** (flat/percent stat bonuses), **sockets** (rune slots), **upgrade level** (0–5), and **upgrade branch** (sharp/light).
+- **Adventure Bag** unlocks the full inventory grid; without it only a small starting grid is available.
 
-### 4.7 Combat / inventory
-Deferred past Phase 0. Plan for: real-time arcade combat (melee swing arcs, projectiles for Archer/Sage), enemy AI (chase + attack), inventory grid, equipment slots, consumables. Design later — just don't block it architecturally.
+### 4.9 Companions
+Hire up to 2 companions at the Adventurer's Guild (Tanker/Archer/Sage role). Companions fight alongside the player, auto-use potions, and gain affinity over time. Fatigue increases each floor; resets at inn. Cannot permanently die.
+
+### 4.10 Bounties
+Daily rotation of 4 bounties from a pool of 22, seeded by current date. Types: kill specific enemy type, kill count, reach a floor, defeat a boss. Bounty rewards: gold + optional materials. Tracked per-run in `activeBounties`; claimed flag stored in `enemyKillMap` with a date key.
 
 ---
 
 ## 5. Project structure
 
 ```
-dungeon-rpg/
+night-dungeon/
 ├─ index.html
 ├─ package.json
 ├─ tsconfig.json            # strict: true
 ├─ vite.config.ts
-├─ CLAUDE.md                # short repo guide for Claude Code (see §8)
-├─ public/
-│  └─ assets/
-│     ├─ tiles/             # tileset PNGs
-│     ├─ sprites/           # character / enemy atlases (PNG + JSON)
-│     ├─ items/             # item icons
-│     └─ maps/              # Tiled JSON (for the Phase 0 test map)
+├─ CLAUDE.md                # repo guide for Claude Code
+├─ DUNGEON_RPG_SPEC.md      # this file
+├─ DUNGEON_RPG_DESIGN_FULL.md # extended design details
+├─ progress.md              # step-by-step implementation progress
+├─ wiki/                    # player-facing reference docs
+├─ supabase/migrations/     # 001_saves.sql
+├─ public/assets/           # tiles, sprites, maps
 └─ src/
-   ├─ main.ts               # Phaser.Game config + scene registration
-   ├─ config.ts             # constants: TILE=32, RES_W=480, RES_H=270, etc.
+   ├─ main.ts
+   ├─ config.ts             # TILE=32, RES_W=480, RES_H=270, PLAYER_SPEED=120, TUNING
+   ├─ lib/                  # inventory helpers, supabase client
    ├─ scenes/
-   │  ├─ BootScene.ts       # set scale mode, load nothing heavy
-   │  ├─ PreloadScene.ts    # load atlases/tilesets, show a loading bar
-   │  ├─ PlayScene.ts       # Phase 0: tilemap + player + camera (the walk-around demo)
-   │  ├─ MainMenuScene.ts   # (P1) title + New Game
-   │  ├─ CharacterCreateScene.ts  # (P1) race/class picker
-   │  ├─ TownScene.ts       # (P2) hub: shops, inn, gate
-   │  ├─ DungeonScene.ts    # (P3) generated floors + warp pads
-   │  └─ UIScene.ts         # (P2) HUD overlay, runs in parallel
+   │  ├─ BootScene.ts       # init, save sync
+   │  ├─ PreloadScene.ts    # asset loading + texture generation
+   │  ├─ MainMenuScene.ts   # title + continue/new game
+   │  ├─ CharacterCreateScene.ts
+   │  ├─ TownScene.ts       # hub: all shops, NPCs, gate
+   │  ├─ ArmoryScene.ts     # weapon/armor shop interior
+   │  ├─ EmporiumScene.ts   # consumables shop interior
+   │  ├─ InnScene.ts        # inn interior
+   │  ├─ SagesTowerScene.ts # enchant/socket/transmute
+   │  ├─ ChapelScene.ts     # bless/buff
+   │  ├─ DungeonScene.ts    # generated floors + combat
+   │  ├─ FloorTransitionScene.ts
+   │  └─ UIScene.ts         # HUD overlay
    ├─ entities/
-   │  ├─ Player.ts          # sprite + movement + animation state machine
-   │  ├─ Interactable.ts    # base for shop/inn/gate/warp-pad
+   │  ├─ Player.ts
+   │  ├─ Enemy.ts
+   │  ├─ Boss.ts
+   │  ├─ Companion.ts
+   │  ├─ Interactable.ts
    │  └─ WarpPad.ts
    ├─ systems/
-   │  ├─ InputController.ts # WASD + arrows, abstracted
-   │  ├─ FloorGenerator.ts  # (P3) seeded room/corridor generation
-   │  └─ SaveManager.ts     # (P5) load/save; stub returns local data for now
-   ├─ data/
-   │  ├─ races.ts           # race table from §4.1
-   │  ├─ classes.ts         # class table + starting equipment from §4.1
-   │  └─ items.ts
-   └─ types/
-      └─ index.ts           # shared TS interfaces (see §6)
+   │  ├─ InputController.ts
+   │  ├─ FloorGenerator.ts  # seeded BSP rooms + corridors
+   │  ├─ Fov.ts             # Bresenham FOV
+   │  └─ SaveManager.ts     # load/write/wipe + account meta
+   └─ data/
+      ├─ races.ts
+      ├─ classes.ts
+      ├─ items.ts           # 100 tiered weapons, 30 armor set pieces, accessories, consumables, materials
+      ├─ enemies.ts         # 47 enemy defs + elite/champion logic
+      ├─ bosses.ts          # 10 boss defs (11 entities for twin fight)
+      ├─ anomalies.ts       # 15 anomaly types
+      ├─ bounties.ts        # 22 bounty templates + daily picker
+      ├─ companions.ts      # companion roster
+      └─ movesets.ts        # weapon family attack patterns
 ```
 
 ---
@@ -179,134 +192,134 @@ dungeon-rpg/
 
 ```ts
 // src/types/index.ts
+
 export type RaceId = 'human' | 'elf' | 'dwarf' | 'barbarian' | 'beastman';
 export type ClassId = 'swordman' | 'archer' | 'tanker' | 'assassin' | 'sage';
+export type Rarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary' | 'mythic';
 
 export interface Stats {
   hp: number; mp: number;
   str: number; dex: number; int: number; vit: number; agi: number;
 }
 
-export interface Race {
-  id: RaceId;
-  name: string;
-  modifiers: Partial<Stats>;
-  allowedClasses: ClassId[];
+export interface Affix { type: 'flat' | 'percent'; stat: string; value: number; }
+
+export interface ItemInstance {
+  id: string;              // unique instance ID
+  itemId: string;          // references ITEMS catalog
+  qty: number;
+  rarity?: Rarity;
+  affixes?: Affix[];
+  isJunk?: boolean;
+  durability?: number;
+  maxDurability?: number;
+  sockets?: string[];      // rune IDs inserted
+  maxSockets?: number;
+  upgradeLevel?: number;   // 0–5
+  branch?: 'sharp' | 'light' | 'none';
 }
 
-export interface CharClass {
-  id: ClassId;
-  name: string;
-  baseStats: Stats;
-  startingEquipment: string[]; // item ids
+export interface CompanionSaveData {
+  id: string; name: string; role: 'tanker' | 'archer' | 'sage';
+  currentHp: number; maxHp: number; potions: number;
+  fatigue: number; affinity: number; command: CompanionCommand;
 }
 
-export interface ItemStack { itemId: string; qty: number; }
+export interface MealBuff {
+  mealId: string; stat: string; value: number; expiresAt: number;
+}
+
+export interface ActiveBounty { id: string; progress: number; completed: boolean; }
 
 export interface CharacterSave {
-  version: number;            // save-format version, start at 1
-  name: string;
-  race: RaceId;
-  clazz: ClassId;
-  level: number;
+  version: number;
+  name: string; race: RaceId; clazz: ClassId;
+  level: number; exp: number;
   stats: Stats;
-  currentHp: number;
-  currentMp: number;
+  currentHp: number; currentMp: number;
   gold: number;
-  inventory: ItemStack[];
-  equipped: Record<string, string | null>; // slot -> itemId
+  inventory: ItemInstance[];
+  equipped: Record<string, ItemInstance | null>;
+  activeWeaponSlot: 0 | 1;
+  hasBag: boolean;
   location: 'town' | 'dungeon';
-  dungeonFloor: number;       // 1..10, 0 if in town
-  floorSeed: number;          // for deterministic regeneration
+  dungeonFloor: number;
+  floorSeed: number;
+  lastWarpIndex: number;
   position: { x: number; y: number };
+  unspentStatPoints: number;
+  unspentSkillPoints: number;
+  unlockedSkills: string[];
+  companions?: CompanionSaveData[];
+  activeMealBuff?: MealBuff;
+  bossesSlain?: string[];
+  activeBounties?: ActiveBounty[];
+  enemiesKilled?: number;
+  enemyKillMap?: Record<string, number>;
   createdAt: string;
+}
+
+// ── Account-level meta (never wiped on permadeath) ────────────────────────────
+
+export interface RunHistoryEntry {
+  runNumber: number; name: string; race: RaceId; clazz: ClassId;
+  floorReached: number; bossesSlain: string[];
+  causeOfDeath: string; survivedMs: number; goldEarned: number;
+  endedAt: string; victory?: boolean;
+}
+
+export interface AccountMeta {
+  runHistory: RunHistoryEntry[];        // last 50 runs
+  hallOfChampions: RunHistoryEntry[];   // victories only
+  unlockedCheckpointFloors: number[];   // e.g. [2, 3, 5]
 }
 ```
 
-### Supabase save table (Phase 5)
+### Supabase save table (Phase 5 — implemented)
 ```sql
 create table saves (
-  user_id    uuid references auth.users not null,
-  slot       int  not null default 0,        -- always 0 (one char per account)
-  data       jsonb not null,                 -- the CharacterSave blob
-  updated_at timestamptz default now(),
-  primary key (user_id, slot)
+  ip_address  text not null primary key,
+  data        jsonb not null,
+  updated_at  timestamptz default now()
 );
--- Enable Row Level Security so a user can only read/write their own save.
 ```
-
-Save strategy: serialize `CharacterSave` to JSON, write on meaningful events (enter/exit floor, town transactions) with a ~2s debounce. On death, `delete` the row.
 
 ---
 
-## 7. PHASE 0 — build this first (acceptance criteria)
+## 7. Phase 0 acceptance criteria (historical — completed)
 
-> Goal: an empty game you can walk around in. Placeholder art is fine.
-
-Implement **only** `BootScene → PreloadScene → PlayScene`.
-
-**Must-haves:**
-1. `npm run dev` starts Vite; the Phaser canvas renders at internal `480 x 270`, integer-scaled and centered, **pixel-perfect (no blur)**.
-2. A tilemap loads from a Tiled JSON in `public/assets/maps/` — a single bounded test area with a floor layer and a walls/collision layer. (A simple hand-made room ~40×30 tiles is enough; full generation comes in P3.)
-3. A **player** sprite spawns and moves with **WASD + arrow keys** (8-directional movement, normalized diagonal speed). Walk/idle animations play and face the movement direction.
-4. **Collision** with the walls layer (arcade physics).
-5. **Camera follows** the player and is clamped to the map bounds (`camera.setBounds`).
-6. Constants centralized in `src/config.ts` (`TILE=32`, `RES_W=480`, `RES_H=270`, `PLAYER_SPEED`).
-7. Strict TypeScript, no `any`, builds clean with `npm run build`.
-
-**Phaser config seed (`src/main.ts`):**
-```ts
-import Phaser from 'phaser';
-import { RES_W, RES_H } from './config';
-import { BootScene } from './scenes/BootScene';
-import { PreloadScene } from './scenes/PreloadScene';
-import { PlayScene } from './scenes/PlayScene';
-
-new Phaser.Game({
-  type: Phaser.AUTO,
-  width: RES_W,
-  height: RES_H,
-  pixelArt: true,
-  roundPixels: true,
-  scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
-  physics: { default: 'arcade', arcade: { debug: false } },
-  scene: [BootScene, PreloadScene, PlayScene],
-});
-```
-
-**Not in Phase 0:** combat, enemies, inventory UI, character creation, town, save/auth, floor generation. Stub `SaveManager` to return an in-memory default character.
+The walk-around prototype was the first milestone:
+1. Vite dev server, Phaser canvas at 480×270, integer-scaled, pixel-perfect.
+2. Tiled JSON map with floor and walls/collision layer.
+3. 8-directional player movement (WASD + arrows), normalised diagonal speed.
+4. Arcade collision with walls.
+5. Camera follows player, clamped to map bounds.
+6. Constants in `src/config.ts`.
+7. Strict TypeScript, no `any`, clean build.
 
 ---
 
-## 8. Roadmap (after Phase 0)
+## 8. Phase roadmap
 
-| Phase | Deliverable |
-|---|---|
-| **P0** | Walk-around prototype (this scaffold). |
-| **P1** | Main menu + character creation (race→class filtered picker) → spawn with stats & starting gear. |
-| **P2** | Town hub scene: dungeon gate, weapon/armor shop, item shop, inn; proximity "Press E" interactions + UI panels; HUD (UIScene). |
-| **P3** | `FloorGenerator` (seeded rooms + corridors), warp pads, floor 1→10 descent, camera/collision on generated maps. |
-| **P4** | Combat (melee arcs, projectiles), enemy AI, loot, inventory + equipment, consumables. |
-| **P5** | Supabase auth + `SaveManager` real implementation; permadeath wipe; debounced autosave. |
-| **P6** | Final pixel-art pass (Aseprite atlases), SFX/music, balancing, polish. |
+| Phase | Status | Deliverable |
+|---|---|---|
+| **P0** | ✅ Complete | Walk-around prototype: Boot→Preload→Play, 40×30 test map, 8-directional player, arcade collision, clamped camera |
+| **P1** | ✅ Complete | Main menu + character creation (race→class filtered picker), stats, starting gear, spawn in town |
+| **P2** | ✅ Complete | Town hub: Armory, Inn, Emporium, proximity "Press E" interactions, UIScene HUD |
+| **P3** | ✅ Complete | `FloorGenerator` (seeded BSP), warp pads, floors 1–10 descent, FOV system, traps |
+| **P4** | ✅ Complete | Real-time combat (stamina, dodge, poise, guard), enemy AI + archetypes, loot + rarity system, full inventory + equipment, consumables, skills, weapon families, status effects, camping/meals, companions, bosses (phases + break parts), anomalies, Sage's Tower enchanting |
+| **P5** | ✅ Complete | Supabase save (IP-based), `SaveManager.wipe()` on permadeath, debounced autosave, account meta, run history, Hall of Champions, checkpoint floors, daily bounties, Town 2.0 (Guild, Wandering Stall, Guard banter, Chapel) |
+| **P6** | 🔄 In progress | Final pixel-art pass (Aseprite atlases), SFX/music, balancing, polish |
 
 ---
 
 ## 9. Using this with Claude Code
 
-Suggested `CLAUDE.md` to drop in the repo root:
+See `CLAUDE.md` in the repo root for the short session-start guide.
 
-```md
-# Project: Dungeon RPG (Phaser 3 + TS + Vite)
-- Read DUNGEON_RPG_SPEC.md for full design. Build phases in order.
-- We are currently on: PHASE 0.
-- All in-game text is English. Keep TypeScript strict (no `any`).
-- Pixel art only: TILE=32, internal res 480x270, pixelArt+roundPixels on.
-- Single-player, client-authoritative. No game server. Backend (Supabase) is Phase 5 only.
-- Prefer small, composable modules. One Phaser Scene per game screen.
-```
+The game is **fully playable** without a Supabase project — it gracefully falls back to localStorage.
 
-**First prompt to Claude Code:**
-> "Read DUNGEON_RPG_SPEC.md. Scaffold the Vite + TypeScript + Phaser 3 project per §5, then implement PHASE 0 (§7) end to end: Boot/Preload/Play scenes, a 40×30 Tiled test map with a wall collision layer, an 8-directional player with idle/walk animations, arcade collision, and a clamped follow-camera. Use simple placeholder art (colored rects or a basic sprite) so I can run `npm run dev` and walk around. Stop after Phase 0 and let me verify."
-
-After verifying P0 runs, advance one phase at a time and update the "currently on" line in `CLAUDE.md`.
+To connect Supabase:
+1. Create a project at supabase.com
+2. Run `supabase/migrations/001_saves.sql` in the SQL editor
+3. Copy `.env.example` → `.env` and fill in `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`

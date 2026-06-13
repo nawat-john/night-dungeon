@@ -3,9 +3,9 @@ import { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
 import { TUNING } from '../config';
 import { SaveManager } from './SaveManager';
+import type { Element, Ailment } from '../types';
 
-export type Element = 'physical' | 'fire' | 'ice' | 'lightning' | 'poison' | 'blunt';
-export type Ailment = 'poison' | 'bleed' | 'burn' | 'chill' | 'frozen' | 'shock' | 'stun' | 'curse' | 'webbed' | 'wet';
+export type { Element, Ailment };
 
 export interface AilmentConfig {
   id: Ailment;
@@ -16,16 +16,25 @@ export interface AilmentConfig {
 }
 
 export const AILMENT_CONFIGS: Record<Ailment, AilmentConfig> = {
-  poison:  { id: 'poison',  name: 'POISON',  color: 0xaa33ff, durationMs: 6000,  icon: '🧪' },
-  bleed:   { id: 'bleed',   name: 'BLEED',   color: 0xff3333, durationMs: 8000,  icon: '🩸' },
-  burn:    { id: 'burn',    name: 'BURN',    color: 0xff7700, durationMs: 5000,  icon: '🔥' },
-  chill:   { id: 'chill',   name: 'CHILL',   color: 0x00ccff, durationMs: 4000,  icon: '❄️' },
-  frozen:  { id: 'frozen',  name: 'FROZEN',  color: 0x00ffff, durationMs: 2500,  icon: '🧊' },
-  shock:   { id: 'shock',   name: 'SHOCK',   color: 0xffea00, durationMs: 6000,  icon: '⚡' },
-  stun:    { id: 'stun',    name: 'STUN',    color: 0x888888, durationMs: 3000,  icon: '💫' },
-  curse:   { id: 'curse',   name: 'CURSE',   color: 0x551177, durationMs: 999999, icon: '💀' }, // virtually permanent
-  webbed:  { id: 'webbed',  name: 'ROOTED',  color: 0x556655, durationMs: 3000,  icon: '🕸️' },
-  wet:     { id: 'wet',     name: 'WET',     color: 0x3333ff, durationMs: 10000, icon: '💦' }
+  // §15 original ailments
+  poison:    { id: 'poison',    name: 'POISON',    color: 0xaa33ff, durationMs: 6000,  icon: '🧪' },
+  bleed:     { id: 'bleed',     name: 'BLEED',     color: 0xff3333, durationMs: 8000,  icon: '🩸' },
+  burn:      { id: 'burn',      name: 'BURN',      color: 0xff7700, durationMs: 5000,  icon: '🔥' },
+  chill:     { id: 'chill',     name: 'CHILL',     color: 0x00ccff, durationMs: 4000,  icon: '❄️' },
+  frozen:    { id: 'frozen',    name: 'FROZEN',    color: 0x00ffff, durationMs: 2500,  icon: '🧊' },
+  shock:     { id: 'shock',     name: 'SHOCK',     color: 0xffea00, durationMs: 6000,  icon: '⚡' },
+  stun:      { id: 'stun',      name: 'STUN',      color: 0x888888, durationMs: 3000,  icon: '💫' },
+  curse:     { id: 'curse',     name: 'CURSE',     color: 0x551177, durationMs: 999999, icon: '💀' },
+  webbed:    { id: 'webbed',    name: 'ROOTED',    color: 0x556655, durationMs: 3000,  icon: '🕸️' },
+  wet:       { id: 'wet',       name: 'WET',       color: 0x3333ff, durationMs: 10000, icon: '💦' },
+  // §E15 P7 additions — data model stubs (full behaviour in P8)
+  ko:         { id: 'ko',         name: 'KO',        color: 0xff8800, durationMs: 1500,  icon: '💢' },
+  wound:      { id: 'wound',      name: 'WOUND',     color: 0xcc2200, durationMs: 12000, icon: '🩹' },
+  sear:       { id: 'sear',       name: 'SEAR',      color: 0xffffaa, durationMs: 8000,  icon: '✨' },
+  blind:      { id: 'blind',      name: 'BLIND',     color: 0x222222, durationMs: 5000,  icon: '👁️' },
+  stuck:      { id: 'stuck',      name: 'STUCK',     color: 0x88aa44, durationMs: 4000,  icon: '🫙' },
+  corruption: { id: 'corruption', name: 'CORRUPT',   color: 0x6600aa, durationMs: 10000, icon: '☠️' },
+  frostbite:  { id: 'frostbite',  name: 'FROSTBITE', color: 0x88ddff, durationMs: 6000,  icon: '🌨️' },
 };
 
 export class StatusSystem {
@@ -45,10 +54,24 @@ export class StatusSystem {
     let multiplier = 1.0;
     if (target instanceof Player) {
       const race = target.scene.registry.get('race') || 'human';
-      if (race === 'elf' && ailmentId === 'poison') multiplier = 0.70;      // +30% poison res
-      else if (race === 'dwarf' && (ailmentId === 'chill' || ailmentId === 'frozen')) multiplier = 0.80; // +20% freeze res
-      else if (race === 'barbarian' && ailmentId === 'stun') multiplier = 0.75; // +25% stun res
-      else if (race === 'beastman' && ailmentId === 'bleed') multiplier = 0.80; // +20% bleed res
+      if (race === 'elf' && ailmentId === 'poison') multiplier = 0.70;
+      else if (race === 'dwarf' && (ailmentId === 'chill' || ailmentId === 'frozen' || ailmentId === 'frostbite')) multiplier = 0.80;
+      else if (race === 'barbarian' && ailmentId === 'stun') multiplier = 0.75;
+      else if (race === 'beastman' && ailmentId === 'bleed') multiplier = 0.80;
+    }
+
+    // §P9 — Frostward 4pc: +30% freeze/frostbite build-up on enemies
+    if (target instanceof Enemy && (ailmentId === 'frostbite' || ailmentId === 'frozen')) {
+      const scene2 = target.scene;
+      const pl = scene2.children.list.find(c => c instanceof Player) as Player | undefined;
+      if (pl && pl.hasSetBonus('frostward', 4)) multiplier *= 1.30;
+    }
+
+    // §P9 — Voidbane 4pc: +30% radiant/sear build-up on enemies
+    if (target instanceof Enemy && (ailmentId === 'sear')) {
+      const scene2 = target.scene;
+      const pl = scene2.children.list.find(c => c instanceof Player) as Player | undefined;
+      if (pl && pl.hasSetBonus('voidbane', 4)) multiplier *= 1.30;
     }
 
     // Standing in Oil makes you 2x flammable
@@ -93,18 +116,46 @@ export class StatusSystem {
     StatusSystem.floatText(scene, `${cfg.icon} ${cfg.name}!`, target.x, target.y - 32, `#${cfg.color.toString(16)}`);
 
     // Reset contradictory ailments
-    if (ailmentId === 'frozen' || ailmentId === 'chill') {
+    if (ailmentId === 'frozen' || ailmentId === 'chill' || ailmentId === 'frostbite') {
       target.activeAilments.delete('burn');
       target.setData('burn_tick_accum', 0);
     } else if (ailmentId === 'burn') {
       target.activeAilments.delete('frozen');
       target.activeAilments.delete('chill');
+      target.activeAilments.delete('frostbite');
       target.activeAilments.delete('wet');
       target.setData('chill_tick_accum', 0);
       target.setData('wet_tick_accum', 0);
     } else if (ailmentId === 'wet') {
       target.activeAilments.delete('burn');
       target.setData('burn_tick_accum', 0);
+    }
+
+    // P8 — KO/Topple: stagger + open punish window
+    if (ailmentId === 'ko' && target instanceof Enemy) {
+      target.applyStagger(1500);
+      target.setData('ko_punish_ms', 3000);
+      StatusSystem.floatText(scene, '💢 TOPPLE!', target.x, target.y - 44, '#ff8800');
+      if (target.def.archetype === 'brute') {
+        scene.game.events.emit('topple-brute');
+      }
+    }
+
+    // P8 — Frozen: stun enemy in place
+    if (ailmentId === 'frozen' && target instanceof Enemy) {
+      target.applyStagger(1200);
+      if (target.body) (target.body as Phaser.Physics.Arcade.Body).setVelocity(0, 0);
+    }
+
+    // P8 — Sear: apply Blind to living targets (not undead/construct/spectral) after 500ms
+    if (ailmentId === 'sear') {
+      const isLiving = !(target instanceof Enemy) ||
+        !(['undead', 'construct', 'spectral'] as string[]).includes(target.def.elemFamily ?? '');
+      if (isLiving) {
+        scene.time.delayedCall(500, () => {
+          if (target.active) StatusSystem.triggerAilment(target, 'blind', scene);
+        });
+      }
     }
 
     // Persist curse to CharacterSave if target is Player
@@ -129,17 +180,19 @@ export class StatusSystem {
     scene: Phaser.Scene,
     attacker?: Player | Enemy
   ): boolean {
-    const isFrozen = (target.activeAilments.get('frozen') ?? 0) > 0;
-    const isChilled = (target.activeAilments.get('chill') ?? 0) > 0;
-    const isShocked = (target.activeAilments.get('shock') ?? 0) > 0;
-    const isBurned = (target.activeAilments.get('burn') ?? 0) > 0;
+    const isFrozen      = (target.activeAilments.get('frozen')    ?? 0) > 0;
+    const isChilled     = (target.activeAilments.get('chill')     ?? 0) > 0;
+    const isFrostbitten = (target.activeAilments.get('frostbite') ?? 0) > 0;
+    const isShocked     = (target.activeAilments.get('shock')     ?? 0) > 0;
+    const isBurned      = (target.activeAilments.get('burn')      ?? 0) > 0;
 
-    // 1. Fire + Ice/Frozen -> Shatter
-    if (newAilment === 'burn' && (isFrozen || isChilled)) {
+    // 1. Fire + Ice/Chill/Frostbite/Frozen -> Shatter
+    if (newAilment === 'burn' && (isFrozen || isChilled || isFrostbitten)) {
       target.activeAilments.delete('frozen');
       target.activeAilments.delete('chill');
-      
-      const shatterDmg = 35; // Flat physical ignores defense
+      target.activeAilments.delete('frostbite');
+
+      const shatterDmg = 35;
       if (target instanceof Enemy) {
         target.takeDamage(shatterDmg, target.x, target.y + 10, 30);
         if (attacker instanceof Player) target.addThreat('player', shatterDmg);
@@ -148,27 +201,50 @@ export class StatusSystem {
       }
 
       StatusSystem.floatText(scene, '💥 SHATTER!', target.x, target.y - 32, '#00ffff');
-      // Visual ice breaking circle
       const circle = scene.add.circle(target.x, target.y, 25, 0x00ffff, 0.4).setDepth(4);
       scene.tweens.add({ targets: circle, scaleX: 1.6, scaleY: 1.6, alpha: 0, duration: 250, onComplete: () => circle.destroy() });
       return true;
     }
 
-    // 2. Fire + Lightning/Shock -> Overload
+    // 2. Blunt (KO build-up) + Frozen -> Enhanced Shatter (+60% AoE; frostward 5pc stacks)
+    if (newAilment === 'ko' && isFrozen) {
+      target.activeAilments.delete('frozen');
+
+      // §P9 — Frostward 5pc: freezing a foe shatters for AoE (+further 30%)
+      const player = scene.children.list.find(c => c instanceof Player) as Player | undefined;
+      const frostwardBonus = (player && player.hasSetBonus('frostward', 5)) ? 1.3 : 1.0;
+      const shatterDmg = Math.round(55 * frostwardBonus);
+      StatusSystem.floatText(scene, '💥 SHATTER!', target.x, target.y - 32, '#00ffff');
+      const bigCircle = scene.add.circle(target.x, target.y, 10, 0x00ffff, 0.5).setDepth(4);
+      scene.tweens.add({ targets: bigCircle, scaleX: 9.0, scaleY: 9.0, alpha: 0, duration: 350, onComplete: () => bigCircle.destroy() });
+      scene.cameras.main.shake(100, 0.006);
+
+      const isAttackerPlayer = attacker instanceof Player || !attacker;
+      if (target instanceof Enemy || isAttackerPlayer) {
+        const enemies = scene.children.list.filter(c => c instanceof Enemy) as Enemy[];
+        for (const e of enemies) {
+          if (e.active && Phaser.Math.Distance.Between(target.x, target.y, e.x, e.y) < 80) {
+            e.takeDamage(shatterDmg, target.x, target.y, 40);
+            if (attacker instanceof Player) e.addThreat('player', shatterDmg);
+          }
+        }
+      }
+      return true;
+    }
+
+    // 3. Fire + Lightning/Shock -> Overload
     if ((newAilment === 'burn' && isShocked) || (newAilment === 'shock' && isBurned)) {
       target.activeAilments.delete('burn');
       target.activeAilments.delete('shock');
 
       StatusSystem.floatText(scene, '⚡ OVERLOAD!', target.x, target.y - 32, '#ffaa00');
 
-      // AoE explosion: deals 25 fire/lightning dmg to all entities in 70px radius
       const explosion = scene.add.circle(target.x, target.y, 10, 0xff7700, 0.5).setDepth(4);
       scene.tweens.add({ targets: explosion, scaleX: 7.0, scaleY: 7.0, alpha: 0, duration: 300, onComplete: () => explosion.destroy() });
       scene.cameras.main.shake(120, 0.008);
 
       const isAttackerPlayer = attacker instanceof Player || !attacker;
       if (isAttackerPlayer) {
-        // Find all nearby enemies
         const enemies = scene.children.list.filter(c => c instanceof Enemy) as Enemy[];
         for (const e of enemies) {
           if (e.active && Phaser.Math.Distance.Between(target.x, target.y, e.x, e.y) < 70) {
@@ -177,7 +253,6 @@ export class StatusSystem {
           }
         }
       } else {
-        // Attacker was enemy, hit player
         const player = (scene as any).player as Player;
         if (player && player.active && Phaser.Math.Distance.Between(target.x, target.y, player.x, player.y) < 70) {
           player.takeDamage(25, target.x, target.y);
@@ -186,19 +261,15 @@ export class StatusSystem {
       return true;
     }
 
-    // 3. Ice + Lightning/Shock -> Superconduct
-    if ((newAilment === 'chill' && isShocked) || (newAilment === 'shock' && isChilled)) {
+    // 4. Ice/Frostbite + Lightning/Shock -> Superconduct
+    if ((newAilment === 'chill' && isShocked) || (newAilment === 'frostbite' && isShocked) ||
+        (newAilment === 'shock' && (isChilled || isFrostbitten))) {
       target.activeAilments.delete('chill');
+      target.activeAilments.delete('frostbite');
       target.activeAilments.delete('shock');
 
       StatusSystem.floatText(scene, '❄️ SUPERCONDUCT!', target.x, target.y - 32, '#aaccff');
 
-      // Apply defense reduction debuff
-      target.activeAilments.set('wet', 0); // clear wet to avoid conflicts
-      target.activeAilments.set('chill', 0);
-      target.activeAilments.set('shock', 0);
-
-      // Superconduct deals 15 base ice/lightning damage and lowers defense
       const superconductDmg = 15;
       if (target instanceof Enemy) {
         target.takeDamage(superconductDmg, target.x, target.y, 10);
@@ -207,7 +278,6 @@ export class StatusSystem {
         target.takeDamage(superconductDmg);
       }
 
-      // Add custom superconducting defense debuff (6s)
       target.setData('superconducting_ms', 6000);
       if (target instanceof Player) {
         const s = SaveManager.load();
@@ -239,6 +309,26 @@ export class StatusSystem {
       }
     }
 
+    // §P9 — Voidbane 5pc: immune to Corruption
+    if (target instanceof Player && (target.activeAilments.get('corruption') ?? 0) > 0) {
+      if (target.hasSetBonus('voidbane', 5)) {
+        target.activeAilments.delete('corruption');
+      }
+    }
+
+    // P8 — KO punish window countdown
+    let koPunishMs = target.getData('ko_punish_ms') ?? 0;
+    if (koPunishMs > 0) {
+      target.setData('ko_punish_ms', Math.max(0, koPunishMs - delta));
+    }
+
+    // P8 — Blind: reduce enemy aggro range while active
+    if (target instanceof Enemy && (target.activeAilments.get('blind') ?? 0) > 0) {
+      target.setData('aggro_range_override', 48);
+    } else if (target instanceof Enemy) {
+      target.setData('aggro_range_override', null);
+    }
+
     // Process ailments
     for (const [id, ms] of target.activeAilments.entries()) {
       if (ms <= 0) continue;
@@ -247,25 +337,32 @@ export class StatusSystem {
       if (nextMs <= 0) {
         target.activeAilments.delete(id);
         if (target instanceof Player && id === 'curse') {
-          // Curse is permanent unless chapel cleanses, so don't delete automatically
           target.activeAilments.set(id, 999999);
         } else {
-          // Normal cleanse
+          // P8 — frostbite expiry chains into frozen
+          if (id === 'frostbite') {
+            StatusSystem.triggerAilment(target, 'frozen', scene);
+          }
           scene.game.events.emit('hud-update', target);
         }
         continue;
       }
       target.activeAilments.set(id, nextMs);
 
-      // DoT Tickers
-      if (id === 'poison' || id === 'bleed' || id === 'burn') {
+      // DoT Tickers (1s interval)
+      if (id === 'poison' || id === 'bleed' || id === 'burn' || id === 'sear' || id === 'corruption') {
         const accumKey = `${id}_tick_accum`;
         let accum = (target.getData(accumKey) ?? 0) + delta;
         if (accum >= 1000) {
           accum -= 1000;
-          StatusSystem.applyAilmentDamage(target, id);
+          StatusSystem.applyAilmentDamage(target, id as Ailment);
         }
         target.setData(accumKey, accum);
+      }
+
+      // P8 — Stuck: zero velocity every tick
+      if (id === 'stuck' && target instanceof Enemy) {
+        if (target.body) (target.body as Phaser.Physics.Arcade.Body).setVelocity(0, 0);
       }
 
       // Shock periodic stagger ticker
@@ -274,7 +371,7 @@ export class StatusSystem {
         if (shockAccum >= 1500) {
           shockAccum -= 1500;
           if (target instanceof Enemy) {
-            target.applyStagger(300); // 0.3s stagger
+            target.applyStagger(300);
           } else {
             target.combatState = 'hitstun';
             target.setData('stateTimer', 300);
@@ -300,32 +397,25 @@ export class StatusSystem {
    * Applies tick damage to target.
    */
   private static applyAilmentDamage(target: Player | Enemy, ailmentId: Ailment): void {
-    let rawDmg = 0;
-    let color = '#ffffff';
-
     if (ailmentId === 'poison') {
-      rawDmg = 3;
-      color = '#aa33ff';
-      // Ignores 50% defense
-      let effDef = Math.round(target.defense * 0.5);
-      let finalDmg = Math.max(1, rawDmg - effDef);
-      StatusSystem.dealFlatDamage(target, finalDmg, color);
+      const effDef = Math.round(target.defense * 0.5);
+      StatusSystem.dealFlatDamage(target, Math.max(1, 3 - effDef), '#aa33ff');
     } else if (ailmentId === 'bleed') {
-      rawDmg = 2;
-      color = '#ff3333';
-      // Doubles if moving
       const isMoving = target.body && target.body.velocity.length() > 8;
-      if (isMoving) {
-        rawDmg = 5;
-        color = '#ff1111';
-      }
-      StatusSystem.dealFlatDamage(target, rawDmg, color);
+      const bleedDmg = isMoving ? 5 : 2;
+      // P10 bloodgorged: heal enemy from bleed instead of dealing damage
+      if (target instanceof Enemy && (target as Enemy).absorbBleeding(bleedDmg)) return;
+      StatusSystem.dealFlatDamage(target, bleedDmg, isMoving ? '#ff1111' : '#ff3333');
     } else if (ailmentId === 'burn') {
-      rawDmg = 4;
-      color = '#ff7700';
-      // Regular defense block
-      let finalDmg = Math.max(1, rawDmg - target.defense);
-      StatusSystem.dealFlatDamage(target, finalDmg, color);
+      StatusSystem.dealFlatDamage(target, Math.max(1, 4 - target.defense), '#ff7700');
+    } else if (ailmentId === 'sear') {
+      // P8 — ignores defense entirely
+      StatusSystem.dealFlatDamage(target, 5, '#ffffaa');
+    } else if (ailmentId === 'corruption') {
+      // P8 — 2% of max HP per second
+      const maxHp = target instanceof Player ? target.maxHp : (target as Enemy).maxHpValue;
+      const corruptDmg = Math.max(1, Math.round(maxHp * 0.02));
+      StatusSystem.dealFlatDamage(target, corruptDmg, '#bb44ff');
     }
   }
 
@@ -394,6 +484,7 @@ export class StatusSystem {
   }
 
   private static floatText(scene: Phaser.Scene, msg: string, x: number, y: number, color: string): void {
+    if ((scene as any).showDamageNumbers === false && /^\d+!?$/.test(msg)) return;
     const t = scene.add.text(x, y, msg, { fontSize: '7px', color }).setOrigin(0.5).setDepth(8);
     scene.tweens.add({ targets: t, alpha: 0, y: y - 26, duration: 1000, onComplete: () => t.destroy() });
   }

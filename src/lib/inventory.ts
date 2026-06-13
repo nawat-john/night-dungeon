@@ -1,5 +1,6 @@
 import { ITEMS } from '../data/items';
 import { ItemInstance, Rarity, Affix } from '../types';
+import { SaveManager } from '../systems/SaveManager';
 
 export const STACK_MAX = 99; // upgraded stack size for stackable consumables/materials
 
@@ -83,6 +84,16 @@ export function addToInventory(
   affixes?: Affix[]
 ): void {
   const isEquip = isEquipment(itemId);
+  const rarityOrder: Record<Rarity, number> = {
+    common: 0,
+    uncommon: 1,
+    rare: 2,
+    epic: 3,
+    legendary: 4,
+    mythic: 5
+  };
+  const itemDef = ITEMS[itemId];
+
   if (isEquip) {
     // Gear doesn't stack — create unique instances
     for (let i = 0; i < qty; i++) {
@@ -96,11 +107,35 @@ export function addToInventory(
         affixes: rolledAffixes,
         isJunk: false
       });
+
+      if (itemDef) {
+        const save = SaveManager.load();
+        if (save) {
+          const currentVal = rarityOrder[rolledRarity];
+          const prevVal = save.rarestFindRarity ? rarityOrder[save.rarestFindRarity] : -1;
+          if (currentVal > prevVal) {
+            save.rarestFindRarity = rolledRarity;
+            save.rarestFind = `${itemDef.name} (${rolledRarity.toUpperCase()})`;
+            SaveManager.write(save);
+          }
+        }
+      }
     }
   } else {
+    if (itemDef) {
+      const save = SaveManager.load();
+      if (save) {
+        const currentVal = rarityOrder['common'];
+        const prevVal = save.rarestFindRarity ? rarityOrder[save.rarestFindRarity] : -1;
+        if (currentVal > prevVal) {
+          save.rarestFindRarity = 'common';
+          save.rarestFind = `${itemDef.name} (COMMON)`;
+          SaveManager.write(save);
+        }
+      }
+    }
     // Stackable items (consumables, materials, ammo)
     let remaining = qty;
-    const itemDef = ITEMS[itemId];
     const maxStack = itemDef?.stackSize ?? STACK_MAX;
 
     for (const stack of inventory) {
