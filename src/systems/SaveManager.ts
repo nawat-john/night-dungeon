@@ -78,6 +78,8 @@ async function syncFromServer(): Promise<void> {
  * Gracefully degrades to localStorage if Supabase isn't configured or offline.
  */
 export async function initSaveManager(): Promise<void> {
+  // Skip network calls entirely when Supabase is not configured (e.g. GitHub Pages demo).
+  if (!getSupabase()) return;
   await resolvePlayerId();
   await syncFromServer();
 }

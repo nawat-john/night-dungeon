@@ -8,7 +8,7 @@ export class BootScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor('#0d0b14');
     const msg = this.add.text(
       this.scale.width / 2, this.scale.height / 2,
-      'CONNECTING...',
+      'LOADING...',
       { fontSize: '14px', color: '#443366' },
     ).setOrigin(0.5);
 
