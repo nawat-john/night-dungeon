@@ -151,11 +151,51 @@ The XP curve is intentionally slow — **out-skill, not out-grind** is the desig
 
 ---
 
-## Skills
+## Skills (P11)
 
-Each class has a dedicated skill tree unlocked via skill points. Skills persist on the save and are never wiped — only permadeath resets them.
+Each class has a dedicated skill tree unlocked via skill points. Skills persist on the save and are lost only on permadeath. Open the skill menu with **K** in-game.
 
-> Full skill tree tables are in the in-game skill menu (press **K**).
+Each tree has **3 branches × 4 tiers** plus a **capstone** (~50 skill points to fully unlock by Lv50).
+
+### Swordman — Blade / Guard / Tempo
+| Branch | Notable skills |
+|---|---|
+| **Blade** | +slash MV per tier; 3rd-light combo attack; Bleed-on-crit (T3); *Crescent Lunge* art (T4) |
+| **Guard** | Faster Riposte window; chip immunity; *Bulwark* (2s omni-guard); counter-stagger on perfect guard |
+| **Tempo** | Roll-cancel heavies; +stamina regen; *Momentum* (no-hit streak → +ATK); perfect-dodge → cooldown refund |
+| **Capstone** | **Perfect Tempo** — perfect dodge resets one skill cooldown |
+
+### Archer — Precision / Volley / Survival
+| Branch | Notable skills |
+|---|---|
+| **Precision** | +weakpoint dmg; charged-shot crit; *Mark* (tagged target +15%); *Deadeye* (charged weakpoint = part-break) |
+| **Volley** | Multishot spread; *Rain of Arrows*; ricochet; +ammo retention |
+| **Survival** | Backstep-shot; move-while-aiming; *Trap Arrow*; +i-frames |
+| **Capstone** | **Hunter's Eye** — Research Lv of target adds bonus dmg (×5% per Research Lv) |
+
+### Tanker — Aegis / Provoke / Impact
+| Branch | Notable skills |
+|---|---|
+| **Aegis** | +block%; perfect-guard window; reflect chip; *Iron Stance* (immovable 3s) |
+| **Provoke** | AoE *Taunt*; threat mult; *Last Stand* (<25% HP → +DEF); aggro-heal |
+| **Impact** | +KO build; *Shield Bash* (stun); *Ground Slam* (AoE topple); KO topple bonus dmg |
+| **Capstone** | **Immovable** — no knockback; perfect guard → stagger shockwave |
+
+### Assassin — Shadow / Venom / Flow
+| Branch | Notable skills |
+|---|---|
+| **Shadow** | Longer stealth; +backstab crit; vanish-on-kill; *Death Mark* execute |
+| **Venom** | Poison/bleed on crit; +dmg vs ailing; *Rupture* (detonate stacks for burst); spread-on-kill |
+| **Flow** | +dodge i-frames; *Frenzy* uptime; dash-attack reset on kill; +crit dmg |
+| **Capstone** | **Lethality** — crits on wounded hitzones can instakill non-elite enemies |
+
+### Sage — Elements / Glyph / Mysticism
+| Branch | Notable skills |
+|---|---|
+| **Elements** | +magic MV; element swap stance; lingering ground hazard; *Meteor* |
+| **Glyph** | Place runes; chain detonations; slow/heal zones; *Glyph Storm* |
+| **Mysticism** | MP efficiency; shields/heals (companions); *Cleanse*; *Mana Shield* |
+| **Capstone** | **Convergence** — detonating two elements on one target triggers a large combined reaction |
 
 ---
 
@@ -205,4 +245,63 @@ At the **Adventurer's Guild** in town you can hire up to **2 companions** (Tanke
 | Fatigue | Increases each floor; companions refuse to descend above 80 fatigue |
 | Affinity | Increases when they land killing blows; unlocks banter lines |
 
-Companions **cannot** be killed — they retreat when HP reaches 0 and return to town. Fatigue resets when you rest at the Inn.
+In **normal mode**: companions retreat when HP hits 0, then fully restore HP and potions when you return to town. Fatigue decreases by 1 each town visit (and resets at the Inn).
+
+In **hardcore companion mode** (toggle in Guild → Companions): companions can die permanently. Any companion whose HP reaches 0 is gone forever.
+
+### Companion commands
+
+Press **TAB** in the dungeon to cycle the active companion's command:
+
+| Command | Behaviour |
+|---|---|
+| Follow | Stays near the player; attacks anything in range |
+| Aggressive | Pursues the nearest enemy independently |
+| Defensive | Guards the player; only attacks enemies that hit you |
+| Focus | Attacks the player's current target |
+| Hold | Stays in place; attacks only things that come to them |
+| Regroup | Returns to player's position immediately |
+
+---
+
+## Specializations (P11)
+
+At the **Floor 4 boss kill**, you choose a permanent specialization for the rest of this run. Respec is not available mid-run (Sage's Tower respec costs materials and can be used between runs only).
+
+| Specialization | Bonus |
+|---|---|
+| **Slayer** | +20% damage vs one chosen body type |
+| **Elementalist** | +25% all elemental damage (slight raw physical reduction) |
+| **Berserker** | Lifesteal on hit; +damage at ≤30% HP |
+| **Sentinel** | Improved guard/parry windows; reflect chip on perfect guard |
+| **Trapper** | Throwables and deployables deal +40% effect |
+
+---
+
+## Weapon Masteries (P11)
+
+Weapon mastery levels (0–5) are tracked per **family** in **account meta** and survive permadeath.
+
+| Mastery Lv | Passive |
+|---|---|
+| 1 | +2% base ATK with this family |
+| 2 | +1 combo window extension |
+| 3 | +5% crit chance with this family |
+| 4 | +8% DMG vs body types this family naturally hits well |
+| 5 | Unique capstone passive per family |
+
+---
+
+## Run Modifiers (P12)
+
+Toggle at character creation. Harder modifiers → better loot weight and bonus bounty gold.
+
+| Modifier | Key | Effect |
+|---|---|---|
+| **Ironbound** | I | Warp Crystals and Recall Stones are disabled |
+| **Starved** | S | All healing −50% |
+| **Hunted** | H | Hunter anomaly appears earlier/more often |
+| **Blackout** | B | FOV radius reduced to 3 tiles |
+| **Glass** | G | Take ×2 damage; deal ×1.5 damage |
+| **Wrongfooted** | O | Enemy elemental weaknesses hidden even at Research Lv2 |
+| **Masochist** | M | Equipment durability + inventory weight limit active |

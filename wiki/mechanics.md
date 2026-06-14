@@ -185,6 +185,43 @@ Negative `elemMult` (−0.5) = ABSORB; heals target instead of hurting. Zero = I
 | plant | 1.2 | 0.9 | 1.0 |
 | aerial | 1.1 | 0.8 | 1.2 |
 
+> Values < 1.0 = resistant; 0 = immune; negative = ABSORB (heals target).
+
+### Elemental family chart (ELEM_CHART)
+
+Values are the elemental damage multiplier applied against that family. −0.5 = ABSORB; 0 = IMMUNE.
+
+| Family \ Element | fire | ice | lightning | poison | void | radiant |
+|---|---|---|---|---|---|---|
+| beast | 1.5 | 1.0 | 1.0 | **2.0** | 1.0 | 0.8 |
+| plant | **2.0** | 1.2 | 1.0 | 0 (immune) | 1.0 | 0.8 |
+| aquatic | 0.5 | 1.5 | **2.0** | 1.0 | 1.0 | 1.0 |
+| fire | **−0.5 (absorb)** | **2.0** | 1.0 | 0.5 | 1.0 | 1.0 |
+| ice | **2.0** | **−0.5 (absorb)** | 1.0 | 0.5 | 1.0 | 1.0 |
+| construct | 0.75 | 0.75 | **2.0** | 0 (immune) | 1.0 | 1.0 |
+| undead | 1.2 | 1.0 | 1.0 | 0 (immune) | 0.5 | **2.0** |
+| spectral | 1.0 | 1.0 | 1.0 | 0 (immune) | 1.2 | **2.0** |
+| void | 1.0 | 1.0 | 1.0 | 0.5 | **−0.5 (absorb)** | **2.0** |
+| insect | 1.5 | **2.0** | 1.2 | 0.5 | 1.0 | 1.0 |
+| storm | 1.5 | 1.5 | **−0.5 (absorb)** | 0.5 | 1.0 | 1.0 |
+
+> **Storm** (Storm Elemental): absorbs lightning — using lightning enrages it. Fire and ice deal 1.5×.
+
+### Tile interactions
+
+Environmental hazard tiles affect targets standing on them and react with elemental attacks.
+
+| Hazard | On-stand effect | Elemental reaction |
+|---|---|---|
+| **Water** | Applies `wet` build-up (35/s) · quenches burn | Fire attacks: ×0.5 burn build-up; lightning: ×2 shock build-up |
+| **Oil** | Sets `in_oil` flag | Fire attack on an oiled target ignites nearby oil tiles → fire hazard |
+| **Ice patch** | Sliding movement (0.93 inertia); builds `chill` (15/s) | — |
+| **Gas / Spore** | Builds poison (20/s) | — |
+| **Curse fog** (F7) | Builds corruption (15/s) | — |
+| **Fire** | Builds burn (30/s); 1 fire dmg / 500ms | — |
+
+> **Frostward 4pc set** negates ice-patch sliding; standing on ice no longer causes inertia.
+
 ### Status-by-source table (P8)
 | Source | Build-up | Notes |
 |---|---|---|
@@ -366,3 +403,82 @@ The persistent `UIScene` overlay shows:
 | Tab | Open inventory |
 | Enter | Confirm |
 | Up / Down | Navigate menus |
+| P | Toggle colorblind mode (swaps element colors to accessible palette) |
+| T | Toggle telegraph emphasis (brightens enemy wind-up flashes) |
+| K (town) | Open key remapping panel |
+| TAB (dungeon) | Cycle companion command (Follow → Aggressive → Defensive → Focus → Hold → Regroup) |
+
+---
+
+## Specializations (P11)
+
+At the **Floor 4 boss kill**, you choose a permanent **specialization** for this run. Each provides a passive bonus to a specific playstyle. Respec is not available mid-run.
+
+| Specialization | Bonus |
+|---|---|
+| **Slayer** | +20% damage vs one chosen body type (selected on pick) |
+| **Elementalist** | +25% all elemental damage; slight reduction in raw physical |
+| **Berserker** | Lifesteal on hit; +damage below 30% HP |
+| **Sentinel** | Improved guard/parry windows; reflect chip damage on perfect guard |
+| **Trapper** | Throwables and deployables deal +40% effect; trap reset speed |
+
+---
+
+## Weapon Masteries (P11)
+
+Each weapon **family** has a mastery level (0–5) tracked on **account meta** — it survives permadeath. Mastery levels increase by landing hits across runs.
+
+| Mastery Lv | Unlock |
+|---|---|
+| 1 | +2% base attack with this family |
+| 2 | +1 combo window (longer chain time) |
+| 3 | +5% crit chance with this family |
+| 4 | +8% damage against body types this family hits well |
+| 5 | Capstone passive (unique per family) |
+
+Mastery is earned per family (sword, bow, staff, etc.) and never resets.
+
+---
+
+## Run Modifiers (P12)
+
+At character creation you may toggle **run modifiers** — voluntary difficulty increases that make the run harder but more rewarding (better loot weight, bonus bounty gold).
+
+| Modifier | Key | Effect |
+|---|---|---|
+| **Ironbound** | I | Warp Crystals and Recall Stones are disabled — you cannot escape mid-run |
+| **Starved** | S | All healing is reduced by 50% (potions, inn, regen) |
+| **Hunted** | H | The Hunter anomaly appears earlier and more frequently |
+| **Blackout** | B | FOV radius reduced to 3 tiles |
+| **Glass** | G | You take ×2 damage from all sources; you deal ×1.5 damage |
+| **Wrongfooted** | O | Enemy weaknesses are hidden even at Research Lv2 |
+| **Masochist** | M | Equipment durability is on; inventory weight limit applies |
+
+Multiple modifiers can be stacked.
+
+---
+
+## Chapel Services
+
+| Service | Cost | Effect |
+|---|---|---|
+| Sell Lv1 Mana Stones | — | 10 g each |
+| Sell Lv2 Mana Stones | — | 25 g each |
+| Convert Mana Stones to EXP | — | Lv1 = 50 EXP; Lv2 = 150 EXP |
+| Cleanse Curse | 30 g | Removes active curse |
+| **Radiant Blessing** | **200 g** | **+25% radiant damage for 1 hour** (real-time; persists between sessions) |
+
+---
+
+## Armory: Weapon Infusion (P12)
+
+At the Armory, select **Infuse Weapon (Element)** to permanently bind an elemental rune to a weapon.
+
+| Step | Detail |
+|---|---|
+| 1 | Select a weapon from inventory or equipped slot |
+| 2 | Choose one of 6 elements (fire / ice / lightning / poison / void / radiant) |
+| Cost | 150 g + 1× matching elemental rune (`rune_fire`, `rune_ice`, etc.) |
+| Effect | Weapon gains `infusedElement` permanently (survives floor transitions; shows in tooltip) |
+
+Only one element can be infused at a time; infusing again overwrites the previous element.

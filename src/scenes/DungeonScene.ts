@@ -91,7 +91,7 @@ export class DungeonScene extends Phaser.Scene {
 
   // §20 Anomaly
   private activeAnomaly: AnomalyId | null = null;
-  private anomalyState: Record<string, number | boolean> = {};
+  private anomalyState: Record<string, number | boolean | string> = {};
   public anomalyProps: { sprite: Phaser.GameObjects.Image; col: number; row: number; propType: string; interacted: boolean }[] = [];
   private anomalyTimer = 0;
   private anomalyFovRadius = 0;
@@ -111,6 +111,8 @@ export class DungeonScene extends Phaser.Scene {
 
   // Live stat snapshot for character screen
   private liveStats: import('../types').Stats | null = null;
+  private radiantBlessedActive = false;
+  private crackedWalls: { col: number; row: number; revealed: boolean; sprite: Phaser.GameObjects.Image | null }[] = [];
 
   // §26 Run tracking
   private runStartMs = 0;
@@ -394,6 +396,7 @@ export class DungeonScene extends Phaser.Scene {
     const _initSave = SaveManager.load();
     if (_initSave) {
       this.liveStats = { ..._initSave.stats };
+      this.radiantBlessedActive = _initSave.activeTonic?.effectId === 'radiant_blessed' && (_initSave.activeTonic.expiresAt ?? 0) > Date.now();
       const ammoId = this.player.attackType === 'arrow' ? 'arrow'
                    : this.player.attackType === 'bolt'  ? 'bolt'
                    : null;
@@ -2752,6 +2755,10 @@ export class DungeonScene extends Phaser.Scene {
         if (finalDmg > 0 && elemArg !== 'none' && this.player.specialization === 'elementalist') {
           finalDmg = Math.round(finalDmg * 1.25);
         }
+        // §P12 — Radiant Blessing: +25% radiant damage
+        if (finalDmg > 0 && elemArg === 'radiant' && this.radiantBlessedActive) {
+          finalDmg = Math.round(finalDmg * 1.25);
+        }
         // §P11 — Slayer specialization: +20% vs chosen body type
         if (finalDmg > 0 && this.player.specialization.startsWith('slayer')) {
           const slayerBody = getSlayerBodyType(this.player.specialization);
@@ -2801,6 +2808,10 @@ export class DungeonScene extends Phaser.Scene {
         let { finalDmg, label } = resolveHit(baseDmg, physType, elemArg, bossBody, bossElemFamily);
         // §P11 — Elementalist specialization: +25% elemental damage
         if (finalDmg > 0 && elemArg !== 'none' && this.player.specialization === 'elementalist') {
+          finalDmg = Math.round(finalDmg * 1.25);
+        }
+        // §P12 — Radiant Blessing: +25% radiant damage
+        if (finalDmg > 0 && elemArg === 'radiant' && this.radiantBlessedActive) {
           finalDmg = Math.round(finalDmg * 1.25);
         }
         // §P11 — Slayer specialization: +20% vs chosen body type
@@ -2903,6 +2914,10 @@ export class DungeonScene extends Phaser.Scene {
             if (finalDmg > 0 && elemArg !== 'none' && this.player.specialization === 'elementalist') {
               finalDmg = Math.round(finalDmg * 1.25);
             }
+            // §P12 — Radiant Blessing: +25% radiant damage
+            if (finalDmg > 0 && elemArg === 'radiant' && this.radiantBlessedActive) {
+              finalDmg = Math.round(finalDmg * 1.25);
+            }
             // §P11 — Slayer specialization: +20% vs chosen body type
             if (finalDmg > 0 && this.player.specialization.startsWith('slayer')) {
               const slayerBody = getSlayerBodyType(this.player.specialization);
@@ -2953,6 +2968,10 @@ export class DungeonScene extends Phaser.Scene {
             let { finalDmg, label } = resolveHit(dmg, projPhysType, elemArg, bossBody, bossElemFamily);
             // §P11 — Elementalist specialization: +25% elemental damage
             if (finalDmg > 0 && elemArg !== 'none' && this.player.specialization === 'elementalist') {
+              finalDmg = Math.round(finalDmg * 1.25);
+            }
+            // §P12 — Radiant Blessing: +25% radiant damage
+            if (finalDmg > 0 && elemArg === 'radiant' && this.radiantBlessedActive) {
               finalDmg = Math.round(finalDmg * 1.25);
             }
             // §P11 — Slayer specialization: +20% vs chosen body type
@@ -3011,6 +3030,10 @@ export class DungeonScene extends Phaser.Scene {
           let { finalDmg, label } = resolveHit(glyphBaseDmg, glyphPhysType, glyphElemArg, e.def.body, e.def.elemFamily);
           // §P11 — Elementalist specialization: +25% elemental damage
           if (finalDmg > 0 && glyphElemArg !== 'none' && this.player.specialization === 'elementalist') {
+            finalDmg = Math.round(finalDmg * 1.25);
+          }
+          // §P12 — Radiant Blessing: +25% radiant damage
+          if (finalDmg > 0 && glyphElemArg === 'radiant' && this.radiantBlessedActive) {
             finalDmg = Math.round(finalDmg * 1.25);
           }
           // §P11 — Slayer specialization: +20% vs chosen body type
@@ -3666,7 +3689,12 @@ export class DungeonScene extends Phaser.Scene {
 
     // §24 Weighted loot drop (floor-scaled, pity nudge, blood-moon doubling)
     const isBloodMoon = this.activeAnomaly === 'blood_moon';
-    const lootResults = LootSystem.rollEnemyDrops(enemy.def.id, this.floor, enemy.isChampion, isBloodMoon);
+    const physElems = new Set(['none', 'physical', 'blunt', 'slash', 'pierce']);
+    const killContext = {
+      statusKill: enemy.lastHitWasStatusTick,
+      elementKill: !!enemy.lastHitElement && !physElems.has(enemy.lastHitElement),
+    };
+    const lootResults = LootSystem.rollEnemyDrops(enemy.def.id, this.floor, enemy.isChampion, isBloodMoon, killContext);
     let gotRareDrop = false;
     for (const drop of lootResults) {
       if (!save) break;
@@ -4368,6 +4396,58 @@ export class DungeonScene extends Phaser.Scene {
           this.placeProp(Math.floor(rx), Math.floor(ry), 'anom_merchant', 'room_merchant');
           break;
         }
+        case 'hazard': {
+          // Collect floor cells inside this room (excluding walls/border)
+          const roomCells: { col: number; row: number }[] = [];
+          for (let row = r.bounds.y + 1; row < r.bounds.y + r.bounds.h - 1; row++) {
+            for (let col = r.bounds.x + 1; col < r.bounds.x + r.bounds.w - 1; col++) {
+              const t = this.tiles[row]?.[col];
+              if (t !== undefined && t !== T_WALL && t !== T_PILLAR && t !== T_WARP) {
+                roomCells.push({ col, row });
+              }
+            }
+          }
+          Phaser.Utils.Array.Shuffle(roomCells);
+          const hazCount = Math.min(4, Math.max(2, Math.floor(roomCells.length * 0.15)));
+          const fl = this.floor;
+          for (let hi = 0; hi < hazCount && hi < roomCells.length; hi++) {
+            const cell = roomCells[hi];
+            if (fl === 3) {
+              const circle = this.add.circle((cell.col + 0.5) * TILE, (cell.row + 0.5) * TILE, 8, 0x22aa33, 0.8).setDepth(2);
+              this.puffballs.push({ x: circle.x, y: circle.y, triggered: false, circle });
+            } else if (fl === 5) {
+              const type: HazardType = hi % 2 === 0 ? 'fire' : 'oil';
+              const h = new Hazard(this, cell.col, cell.row, type);
+              this.hazards.push(h); this.hazardGroup.add(h);
+            } else if (fl === 6) {
+              const rect = this.add.rectangle((cell.col + 0.5) * TILE, (cell.row + 0.5) * TILE, TILE - 2, TILE - 2, 0x88ccff, 0.25).setDepth(1.2);
+              this.thinIceTiles.push({ col: cell.col, row: cell.row, collapsed: false, rect });
+            } else if (fl === 7) {
+              const h = new Hazard(this, cell.col, cell.row, 'gas');
+              h.setFillStyle(0x3a1a4a, 0.4); (h as any).isCurseFog = true;
+              this.hazards.push(h); this.hazardGroup.add(h);
+            } else if (fl === 8) {
+              if (hi === 0) {
+                const cx = (cell.col + 0.5) * TILE;
+                const cy = (cell.row + 0.5) * TILE;
+                const outer = this.add.circle(cx, cy, 60, 0x5a189a, 0.15).setDepth(1.2);
+                const inner = this.add.circle(cx, cy, 10, 0x000000, 1.0).setStrokeStyle(2, 0xff00ff).setDepth(1.3);
+                this.tweens.add({ targets: outer, scaleX: 1.3, scaleY: 1.3, alpha: 0.05, duration: 1800, yoyo: true, repeat: -1 });
+                this.gravityWells.push({ x: cx, y: cy, radius: 60, outerCircle: outer, innerCircle: inner });
+              } else {
+                const rS = this.add.circle((cell.col + 0.5) * TILE, (cell.row + 0.5) * TILE, 6, 0x8222ff, 0.75).setStrokeStyle(1.5, 0xffffff).setDepth(3);
+                this.physics.add.existing(rS);
+                const angle = Math.random() * Math.PI * 2;
+                this.driftingRifts.push({ sprite: rS, vx: Math.cos(angle) * 35, vy: Math.sin(angle) * 35 });
+              }
+            } else {
+              const genericTypes: HazardType[] = ['water', 'oil', 'gas'];
+              const h = new Hazard(this, cell.col, cell.row, genericTypes[hi % genericTypes.length]);
+              this.hazards.push(h); this.hazardGroup.add(h);
+            }
+          }
+          break;
+        }
       }
     }
 
@@ -4460,7 +4540,7 @@ export class DungeonScene extends Phaser.Scene {
           }
         }
       } else if (state === 'active') {
-        const alive = arena.enemies.some(e => e.active && e.hp > 0);
+        const alive = arena.enemies.some(e => e.active);
         if (!alive) {
           this.anomalyState[stateKey] = 'completed';
           this.showCenterText("ARENA CLEARED!\nRoom unsealed.");
@@ -5032,7 +5112,7 @@ export class DungeonScene extends Phaser.Scene {
 
     let list = "KEY REMAPPING MODE\n\nPress [1-9] to select key to remap:\n";
     this.keyRemapBindings.forEach((item, idx) => {
-      const currentKey = Phaser.Input.Keyboard.KeyCodes[item.keyCode] || String.fromCharCode(item.keyCode);
+      const currentKey = (Phaser.Input.Keyboard.KeyCodes as Record<number, unknown>)[item.keyCode] || String.fromCharCode(item.keyCode);
       list += `[${idx + 1}] ${item.label}: ${currentKey}\n`;
     });
     list += "\nPress [K] to Save & Exit";
@@ -5136,8 +5216,20 @@ export class DungeonScene extends Phaser.Scene {
 
     // Elemental ailments
     if (el === 'fire') {
-      const burnAmt = enemyFamily === 'plant' ? 38 : 25;
+      // fire ×0.5 build-up on wet targets (water extinguishes partially)
+      const isWet = (target.activeAilments.get('wet') ?? 0) > 0;
+      const burnBase = enemyFamily === 'plant' ? 38 : 25;
+      const burnAmt = isWet ? Math.round(burnBase * 0.5) : burnBase;
       StatusSystem.applyBuildUp(target, 'burn', burnAmt, this, this.player);
+      // Fire attack on a target standing in oil → ignite nearby oil hazards
+      if (target.getData('in_oil')) {
+        const tx = target.x, ty = target.y;
+        for (const h of this.hazards) {
+          if (h.hazardType === 'oil' && Phaser.Math.Distance.Between(tx, ty, h.x, h.y) < 48) {
+            h.ignite(this);
+          }
+        }
+      }
     } else if (el === 'ice') {
       StatusSystem.applyBuildUp(target, 'frostbite', 25, this, this.player);
     } else if (el === 'lightning') {

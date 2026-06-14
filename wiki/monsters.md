@@ -79,6 +79,8 @@ Each enemy has a one-line **identity** (what makes it scary), a **signature** me
 
 Columns: **Body** (phys chart) · **Family** (elem chart) · **Counter** (revealed at Research Lv2)
 
+> For full elemental multiplier tables see [Mechanics → Elemental family chart](mechanics.md). Key highlights: aquatic = ×2 lightning; fire-family absorbs fire (−0.5×); undead = ×2 radiant; **storm** absorbs lightning (−0.5×) and is weak to fire+ice (×1.5).
+
 ### Floor 1 — Ruined Entrance
 
 | Enemy | Archetype | HP | Dmg | Body | Family | Counter |

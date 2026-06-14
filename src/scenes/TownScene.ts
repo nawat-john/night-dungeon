@@ -38,6 +38,14 @@ export class TownScene extends Phaser.Scene {
     const save = SaveManager.load();
     if (!save) { this.scene.start('MainMenuScene'); return; }
     save.location = 'town';
+    // Restore surviving companions to full HP in normal mode; dead ones already removed by DungeonScene
+    if ((save.companions ?? []).length > 0 && !save.hardcoreCompanions) {
+      for (const comp of save.companions!) {
+        comp.currentHp = comp.maxHp;
+        comp.potions = 3;
+        comp.fatigue = Math.max(0, (comp.fatigue ?? 0) - 1);
+      }
+    }
     SaveManager.write(save);
 
     AudioManager.playMusic('town');
@@ -459,6 +467,22 @@ export class TownScene extends Phaser.Scene {
         container.add(dismissBtn);
       });
     }
+
+    // Hardcore companion toggle
+    const isHardcore = save.hardcoreCompanions ?? false;
+    const toggleLabel = isHardcore ? 'Companion Mode: HARDCORE (death = permanent)' : 'Companion Mode: Normal (respawn between runs)';
+    const toggleBtn = this.add.text(0, contentY + 204, toggleLabel, {
+      fontSize: '6px', color: isHardcore ? '#ff6666' : '#66bbff', backgroundColor: '#111111', padding: { x: 6, y: 2 },
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    toggleBtn.on('pointerdown', () => {
+      const s = SaveManager.load();
+      if (!s) return;
+      s.hardcoreCompanions = !(s.hardcoreCompanions ?? false);
+      SaveManager.write(s);
+      close();
+      this.openGuildPanel('companions');
+    });
+    container.add(toggleBtn);
   }
 
   private buildGuildBounties(container: Phaser.GameObjects.Container, save: ReturnType<typeof SaveManager.load>, contentY: number, pw: number, ph: number, close: () => void): void {

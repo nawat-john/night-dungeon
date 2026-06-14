@@ -7,7 +7,7 @@
  * Pity / anti-streak: a gentle dry-streak nudge tracked in the `LootSystem`.
  */
 
-export type DropCondition = 'always' | 'champion_only' | 'part_broken';
+export type DropCondition = 'always' | 'champion_only' | 'part_broken' | 'status_kill' | 'element_kill';
 
 export interface DropEntry {
   itemId: string;
@@ -609,6 +609,7 @@ export class LootSystem {
     floor: number,
     isChampion = false,
     isBloodMoon = false,
+    killContext?: { statusKill?: boolean; elementKill?: boolean },
   ): { itemId: string; qty: number; isGold?: boolean }[] {
     const results: { itemId: string; qty: number; isGold?: boolean }[] = [];
 
@@ -627,6 +628,8 @@ export class LootSystem {
       if (e.minFloor !== undefined && floor < e.minFloor) return false;
       if (e.condition === 'champion_only' && !isChampion) return false;
       if (e.condition === 'part_broken') return false; // only via explicit boss-part break
+      if (e.condition === 'status_kill' && !killContext?.statusKill) return false;
+      if (e.condition === 'element_kill' && !killContext?.elementKill) return false;
       return true;
     });
     if (eligible.length === 0) return results;
@@ -688,6 +691,7 @@ export class LootSystem {
     floor: number,
     isChampion = false,
     isBloodMoon = false,
+    killContext?: { statusKill?: boolean; elementKill?: boolean },
   ): { itemId: string; qty: number; isGold?: boolean }[] {
     const table = ENEMY_LOOT[enemyId];
     if (!table) {
@@ -702,6 +706,6 @@ export class LootSystem {
         ...(Math.random() < 0.5 ? [{ itemId: fallbackFloorMat, qty: 1 }] : []),
       ];
     }
-    return this.rollDrops(table, floor, isChampion, isBloodMoon);
+    return this.rollDrops(table, floor, isChampion, isBloodMoon, killContext);
   }
 }

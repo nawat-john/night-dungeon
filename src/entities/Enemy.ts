@@ -220,9 +220,11 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
   }
 
   lastHitElement?: string;
+  lastHitWasStatusTick = false;
 
   takeDamage(amount: number, fromX?: number, fromY?: number, poiseDmg = 0, element?: string): void {
     this.lastHitElement = element;
+    this.lastHitWasStatusTick = fromX === undefined;
     let rawDmg = amount;
 
     // Back-hit bonus: 15% extra damage when attacker is behind the enemy

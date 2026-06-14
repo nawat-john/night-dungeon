@@ -1514,7 +1514,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     let vy = len > 0 ? (dir.y / len) * PLAYER_SPEED * speedMult : 0;
     if (isRooted) { vx = 0; vy = 0; }
 
-    if (this.getData('on_ice')) {
+    if (this.getData('on_ice') && !this.hasSetBonus('frostward', 4)) {
       const slideInertia = 0.93;
       vx = body.velocity.x * slideInertia + vx * (1 - slideInertia);
       vy = body.velocity.y * slideInertia + vy * (1 - slideInertia);

@@ -181,6 +181,7 @@ export interface ItemInstance {
   maxSockets?: number;
   upgradeLevel?: number;
   branch?: 'sharp' | 'light' | 'none';
+  infusedElement?: Element;
 }
 
 export type CompanionRole    = 'tanker' | 'archer' | 'sage';
@@ -248,6 +249,7 @@ export interface CharacterSave {
   rarestFindRarity?: Rarity;
   nemesisKills?: number;
   companions?: CompanionSaveData[];
+  hardcoreCompanions?: boolean;
   activeMealBuff?: MealBuff;
   bossesSlain?: string[];
   activeBounties?: ActiveBounty[];

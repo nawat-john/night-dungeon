@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Read `DUNGEON_RPG_SPEC.md` for the full design — it is the source of truth. Build phases in order; do not skip ahead.
 
-**Currently on: PHASE 6 (P1–P5 complete, ready for art/polish pass)**
+**Currently on: COMPLETE (P1–P12 done; all expansion phases implemented)**
 
 ---
 

@@ -456,6 +456,21 @@ Key recipes; full list in `src/data/alchemy.ts`.
 | Chainmail | 90 g |
 | Round Shield | 60 g |
 
+**Weapon Infusion (P12):**
+
+Permanently bind an element to a weapon. Cost: 150 g + 1× matching elemental rune. Select **Infuse Weapon** (option 5) in the Armory menu.
+
+| Element | Rune required |
+|---|---|
+| fire | `rune_fire` |
+| ice | `rune_ice` |
+| lightning | `rune_lightning` |
+| poison | `rune_poison` |
+| void | `rune_void` |
+| radiant | `rune_radiant` |
+
+The `infusedElement` is permanent and shows `[fire]` etc. in the item tooltip. Infusing again overwrites the previous element.
+
 **Upgrade (equipment level +1):**
 
 | Current rank | Gold | Material |
@@ -529,3 +544,27 @@ The Stall's stock rotates daily (date-seeded). Check back after midnight for new
 Gold is the only currency. Earned by killing enemies (each enemy has a gold drop range), bounty rewards, and selling items. Persists across floors and is saved on floor transitions.
 
 On **permadeath**, all gold (and the entire save) is permanently deleted.
+
+---
+
+## Chapel services
+
+| Service | Cost | Effect |
+|---|---|---|
+| Sell all Lv1 Mana Stones | — | 10 g each |
+| Sell all Lv2 Mana Stones | — | 25 g each |
+| Convert all to EXP | — | Lv1 = 50 EXP; Lv2 = 150 EXP (can level up) |
+| Cleanse Curse | 30 g | Removes active curse ailment |
+| **Radiant Blessing** (P12) | **200 g** | **+25% radiant damage for 1 real-time hour** (persists across sessions; visible in Chapel panel when active) |
+
+---
+
+## Sage's Tower services
+
+| Service | Key | Description |
+|---|---|---|
+| Enchant / Affix Reroll | 1 | Pay gold to reroll one affix on a piece of gear |
+| Socket Rune | 2 | Insert a stat or elemental rune into a socketed item |
+| Socket Jewel | 3 | Insert a jewel into a gear socket |
+| Transmute | 4 | Combine ×5 lower-tier materials → chance at higher tier |
+| Salvage | 5 | Disassemble unwanted gear into base materials |

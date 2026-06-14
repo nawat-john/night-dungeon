@@ -176,6 +176,7 @@ export class ChapelScene extends Phaser.Scene {
     c.add(this.add.rectangle(0, 0, cw, ch, 0x06080e, 0.97).setStrokeStyle(1, 0x554488));
     c.add(this.add.text(0, -ch/2+14, 'CHAPEL OF LIGHT', { fontSize: '11px', color: '#ccaaff' }).setOrigin(0.5));
     c.add(this.add.rectangle(0, -ch/2+26, cw-20, 1, 0x332255));
+    const blessActive = save.activeTonic?.effectId === 'radiant_blessed' && save.activeTonic.expiresAt > Date.now();
     const lines = [
       `Lv1 Mana Stones: ${stone1}  (sell 10g | 50 EXP each)`,
       `Lv2 Mana Stones: ${stone2}  (sell 25g | 150 EXP each)`,
@@ -185,16 +186,16 @@ export class ChapelScene extends Phaser.Scene {
       '1. Sell all Lv1 Stones',
       '2. Sell all Lv2 Stones',
       '3. Convert all to EXP',
-      save.curseActive ? '4. Cleanse Curse (30 gold)' : '4. Cleanse Curse (No active curse)'
+      save.curseActive ? '4. Cleanse Curse (30 gold)' : '4. Cleanse Curse (No active curse)',
+      blessActive ? '5. Radiant Blessing (ACTIVE)' : '5. Radiant Blessing (200g) — +radiant dmg 1 run'
     ];
     lines.forEach((line, i) => {
       let color = '#ccbbee';
       if (i > 4) {
-        if (i === 8 && !save.curseActive) {
-          color = '#777777';
-        } else {
-          color = '#aaddaa';
-        }
+        if (i === 8 && !save.curseActive) color = '#777777';
+        else if (i === 9 && blessActive) color = '#ffdd88';
+        else if (i === 9) color = '#aaddff';
+        else color = '#aaddaa';
       }
       c.add(this.add.text(-cw/2+12, -ch/2+36+i*18, line, { fontSize: '9px', color }));
     });
@@ -262,6 +263,23 @@ export class ChapelScene extends Phaser.Scene {
           SaveManager.write(s);
           this.game.events.emit('hud-update', this.player);
           this.showToast("Curse cleansed successfully!");
+          c.destroy(); this.activePanel = null; window.removeEventListener('keydown', handler);
+          this.openChapelPanel();
+        }
+      } else if (e.key === '5') {
+        const alreadyBlessed = s.activeTonic?.effectId === 'radiant_blessed' && s.activeTonic.expiresAt > Date.now();
+        if (alreadyBlessed) {
+          this.showToast("Radiant Blessing already active!");
+        } else if (s.gold < 200) {
+          this.showToast("Not enough gold (requires 200g)!");
+        } else {
+          this.player.gold -= 200;
+          s.gold = this.player.gold;
+          // expires after 1 hour of real time (survives across sessions)
+          s.activeTonic = { effectId: 'radiant_blessed', expiresAt: Date.now() + 60 * 60 * 1000 };
+          SaveManager.write(s);
+          this.game.events.emit('hud-update', this.player);
+          this.showToast("Radiant Blessing granted — +25% radiant damage for 1 hour!");
           c.destroy(); this.activePanel = null; window.removeEventListener('keydown', handler);
           this.openChapelPanel();
         }

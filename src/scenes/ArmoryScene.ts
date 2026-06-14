@@ -143,8 +143,9 @@ export class ArmoryScene extends Phaser.Scene {
   }
 
   private openShop(): void {
-    let mode: 'main' | 'buy' | 'upgrade' | 'upgrade_confirm' | 'forge' | 'repair' = 'main';
+    let mode: 'main' | 'buy' | 'upgrade' | 'upgrade_confirm' | 'forge' | 'repair' | 'infuse' = 'main';
     let selectedItemIndex = 0;
+    let infuseWeaponEntry: { source: 'inventory' | 'equipped'; slot?: string; index?: number; item: ItemInstance } | null = null;
     
     const { width: sw, height: sh } = this.cameras.main;
     const pw = 320, ph = 260;
@@ -166,9 +167,10 @@ export class ArmoryScene extends Phaser.Scene {
           '2. Upgrade Weapons/Armor',
           '3. Forge Boss Equipment',
           '4. Repair Equipment',
+          '5. Infuse Weapon (Element)',
         ];
         choices.forEach((choice, i) => {
-          c.add(this.add.text(-60, -ph/2 + 80 + i * 22, choice, { fontSize: '10px', color: '#ccccee' }));
+          c.add(this.add.text(-60, -ph/2 + 80 + i * 22, choice, { fontSize: '10px', color: i === 4 ? '#88ccff' : '#ccccee' }));
         });
         c.add(this.add.text(0, ph/2-14, 'Q/Esc: Close Menu', { fontSize: '8px', color: '#665577' }).setOrigin(0.5));
       }
@@ -319,6 +321,59 @@ export class ArmoryScene extends Phaser.Scene {
 
         c.add(this.add.text(0, ph/2-14, '1-4: Forge Equipment   Q/Esc: Back', { fontSize: '8px', color: '#665577' }).setOrigin(0.5));
       }
+      else if (mode === 'infuse') {
+        c.add(this.add.text(0, -ph/2 + 38, '=== INFUSE WEAPON ===', { fontSize: '9px', color: '#88ccff' }).setOrigin(0.5));
+        const ELEM_RUNES: { runeId: string; element: string; label: string }[] = [
+          { runeId: 'rune_fire',      element: 'fire',      label: 'Fire Rune   → Fire element' },
+          { runeId: 'rune_ice',       element: 'ice',       label: 'Ice Rune    → Ice element'  },
+          { runeId: 'rune_lightning', element: 'lightning', label: 'Storm Rune  → Lightning'    },
+          { runeId: 'rune_poison',    element: 'poison',    label: 'Venom Rune  → Poison'       },
+          { runeId: 'rune_void',      element: 'void',      label: 'Void Rune   → Void'         },
+          { runeId: 'rune_radiant',   element: 'radiant',   label: 'Radiant Rune→ Radiant'      },
+        ];
+
+        if (!infuseWeaponEntry) {
+          // Step 1: pick weapon
+          const weapList: { source: 'inventory' | 'equipped'; slot?: string; index?: number; item: ItemInstance }[] = [];
+          Object.entries(save.equipped).forEach(([slot, item]) => {
+            if (item && ITEMS[item.itemId]?.type === 'weapon') weapList.push({ source: 'equipped', slot, item });
+          });
+          save.inventory.forEach((item, idx) => {
+            if (ITEMS[item.itemId]?.type === 'weapon') weapList.push({ source: 'inventory', index: idx, item });
+          });
+
+          if (weapList.length === 0) {
+            c.add(this.add.text(0, 0, 'No weapons found to infuse.', { fontSize: '9px', color: '#ff4444' }).setOrigin(0.5));
+          } else {
+            c.add(this.add.text(0, -ph/2 + 52, 'Step 1: Choose weapon to infuse', { fontSize: '8px', color: '#aaddff' }).setOrigin(0.5));
+            const start = Math.max(0, Math.min(weapList.length - 4, selectedItemIndex - 2));
+            weapList.slice(start, start + 4).forEach((entry, i) => {
+              const actualIdx = start + i;
+              const active = actualIdx === selectedItemIndex;
+              const iy = -ph/2 + 68 + i * 22;
+              const name = ITEMS[entry.item.itemId]?.name ?? 'Weapon';
+              const current = entry.item.infusedElement ? ` [${entry.item.infusedElement}]` : '';
+              const loc = entry.source === 'equipped' ? '(E)' : '';
+              c.add(this.add.text(-pw/2+14, iy, `${active ? '>' : ' '} ${name}${current} ${loc}`,
+                { fontSize: '8px', color: active ? '#ffffff' : '#887799' }));
+            });
+          }
+          c.add(this.add.text(0, ph/2-14, 'UP/DOWN: Select   ENTER: Pick Weapon   Q/Esc: Back', { fontSize: '7px', color: '#665577' }).setOrigin(0.5));
+        } else {
+          // Step 2: pick elemental rune
+          c.add(this.add.text(0, -ph/2 + 52, `Step 2: Pick rune for: ${ITEMS[infuseWeaponEntry.item.itemId]?.name ?? 'Weapon'}`, { fontSize: '8px', color: '#aaddff' }).setOrigin(0.5));
+          c.add(this.add.text(0, -ph/2 + 64, 'Cost: 150g + 1 Rune (consumed)', { fontSize: '7px', color: '#998888' }).setOrigin(0.5));
+          ELEM_RUNES.forEach((r, i) => {
+            const qty = countInInventory(save.inventory, r.runeId);
+            const canAfford = save.gold >= 150 && qty > 0;
+            c.add(this.add.text(-pw/2+14, -ph/2 + 82 + i * 20,
+              `${i+1}. ${r.label}  (have ${qty})`,
+              { fontSize: '8px', color: canAfford ? '#88ffaa' : '#554455' }));
+          });
+          c.add(this.add.text(0, ph/2-28, `Gold: ${save.gold}g`, { fontSize: '8px', color: '#ffdd44' }).setOrigin(0.5));
+          c.add(this.add.text(0, ph/2-14, '1-6: Infuse   Q/Esc: Back to weapon select', { fontSize: '7px', color: '#665577' }).setOrigin(0.5));
+        }
+      }
       else if (mode === 'repair') {
         c.add(this.add.text(0, -ph/2 + 38, '=== REPAIR EQUIPMENT ===', { fontSize: '9px', color: '#9ca0b2' }).setOrigin(0.5));
 
@@ -379,6 +434,7 @@ export class ArmoryScene extends Phaser.Scene {
         else if (e.key === '2') { mode = 'upgrade'; selectedItemIndex = 0; render(); }
         else if (e.key === '3') { mode = 'forge'; render(); }
         else if (e.key === '4') { mode = 'repair'; selectedItemIndex = 0; render(); }
+        else if (e.key === '5') { mode = 'infuse'; selectedItemIndex = 0; infuseWeaponEntry = null; render(); }
         else if (e.key === 'q' || e.key === 'Q' || e.key === 'Escape') {
           c.destroy(); this.activePanel = null; window.removeEventListener('keydown', handler);
         }
@@ -636,6 +692,61 @@ export class ArmoryScene extends Phaser.Scene {
               }
             }
           }
+        }
+      }
+      else if (mode === 'infuse') {
+        const ELEM_RUNES: { runeId: string; element: string }[] = [
+          { runeId: 'rune_fire',      element: 'fire'      },
+          { runeId: 'rune_ice',       element: 'ice'       },
+          { runeId: 'rune_lightning', element: 'lightning' },
+          { runeId: 'rune_poison',    element: 'poison'    },
+          { runeId: 'rune_void',      element: 'void'      },
+          { runeId: 'rune_radiant',   element: 'radiant'   },
+        ];
+
+        if (!infuseWeaponEntry) {
+          // Step 1: select weapon
+          const weapList: { source: 'inventory' | 'equipped'; slot?: string; index?: number; item: ItemInstance }[] = [];
+          Object.entries(save.equipped).forEach(([slot, item]) => {
+            if (item && ITEMS[item.itemId]?.type === 'weapon') weapList.push({ source: 'equipped', slot, item });
+          });
+          save.inventory.forEach((item, idx) => {
+            if (ITEMS[item.itemId]?.type === 'weapon') weapList.push({ source: 'inventory', index: idx, item });
+          });
+
+          if (e.key === 'ArrowUp') { selectedItemIndex = Math.max(0, selectedItemIndex - 1); render(); }
+          else if (e.key === 'ArrowDown') { selectedItemIndex = Math.min(weapList.length - 1, selectedItemIndex + 1); render(); }
+          else if (e.key === 'Enter' && weapList[selectedItemIndex]) {
+            infuseWeaponEntry = weapList[selectedItemIndex];
+            render();
+          }
+          else if (e.key === 'q' || e.key === 'Q' || e.key === 'Escape') { mode = 'main'; render(); }
+        } else {
+          // Step 2: select rune
+          const idx = ['1','2','3','4','5','6'].indexOf(e.key);
+          if (idx >= 0) {
+            const rune = ELEM_RUNES[idx];
+            if (!rune) return;
+            const qty = countInInventory(save.inventory, rune.runeId);
+            if (save.gold < 150) { this.showToast('Need 150g!'); return; }
+            if (qty < 1) { this.showToast(`Need 1x ${rune.runeId}!`); return; }
+            // Apply infusion
+            this.player.addGold(-150);
+            save.gold = this.player.gold;
+            this.consumeInventoryItem(save.inventory, rune.runeId, 1);
+            infuseWeaponEntry.item.infusedElement = rune.element as import('../types').Element;
+            if (infuseWeaponEntry.source === 'equipped') {
+              save.equipped[infuseWeaponEntry.slot!] = infuseWeaponEntry.item;
+            } else {
+              save.inventory[infuseWeaponEntry.index!] = infuseWeaponEntry.item;
+            }
+            SaveManager.write(save);
+            this.showToast(`Infused with ${rune.element.toUpperCase()}!`);
+            infuseWeaponEntry = null;
+            mode = 'infuse';
+            render();
+          }
+          if (e.key === 'q' || e.key === 'Q' || e.key === 'Escape') { infuseWeaponEntry = null; render(); }
         }
       }
     };
