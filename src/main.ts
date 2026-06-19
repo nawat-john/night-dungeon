@@ -26,6 +26,12 @@ function startGame(): void {
   // Critically: do NOT set `resolution` here — Phaser's pixelArt mode uses
   // NEAREST texture filtering, so resolution > 1 causes the text canvas to be
   // downsampled with nearest-neighbour, which destroys quality.
+  //
+  // The pixel font ("Press Start 2P") packs glyphs tightly against the top of
+  // the line box and leaves no gap between lines, so multi-line blocks read as
+  // cramped. Default a little `lineSpacing` (gap between lines) and top `padding`
+  // (margin above the letters) globally. Both sit BEFORE `...style`, so any call
+  // that sets its own value still overrides these defaults.
   const origText = Phaser.GameObjects.GameObjectFactory.prototype.text;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (Phaser.GameObjects.GameObjectFactory.prototype as any).text = function (
@@ -36,7 +42,7 @@ function startGame(): void {
   ): Phaser.GameObjects.Text {
     return (origText as (...a: unknown[]) => Phaser.GameObjects.Text).call(
       this, x, y, text,
-      { fontFamily: '"Press Start 2P"', ...style },
+      { fontFamily: '"Press Start 2P"', lineSpacing: 4, padding: { top: 3 }, ...style },
     );
   };
 
